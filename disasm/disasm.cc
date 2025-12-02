@@ -786,6 +786,7 @@ disassembler_t::disassembler_t(int xlen)
   DEFINE_RTYPE(torchsim_vpop);
   DEFINE_RTYPE(torchsim_compute);
   DEFINE_RTYPE(torchsim_vexp);
+  // Hands-on: Add vexp2 here
   DEFINE_RTYPE(torchsim_verf);
   DEFINE_RTYPE(torchsim_vtanh);
   DEFINE_RTYPE(torchsim_vsin);
