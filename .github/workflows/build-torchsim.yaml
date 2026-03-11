@@ -25,7 +25,7 @@ jobs:
             ghcr.io/psal-postech/torchsim_base:latest \
             bash -c '
               mkdir -p build && cd build &&
-              ../configure --prefix=/workspace/release &&
+              ../configure --prefix=/workspace/release --with-isa=RV64IMAFDCV_zfh &&
               make -j$(nproc) &&
               make install'
 

@@ -18,7 +18,23 @@ for (reg_t vu_idx=0; vu_idx<n_vu; vu_idx++) {
         VI_STRIP(i);
         P.VU.vstart->write(i);
         float val = P.SA->deserializer_pop(vu_idx);
-        P.VU.elt<float>(vd, vreg_inx, vu_idx, true) = val;
+        switch (P.VU.vsew) {
+          case e8:
+            P.VU.elt<int8_t>(vd, vreg_inx, vu_idx, true) = static_cast<int8_t>(val);
+            break;
+          case e16: {
+            float32_t fp32;
+            memcpy(&fp32.v, &val, sizeof(float));
+            P.VU.elt<float16_t>(vd, vreg_inx, vu_idx, true) = f32_to_f16(fp32);
+            break;
+          }
+          case e32:
+            P.VU.elt<float>(vd, vreg_inx, vu_idx, true) = val;
+            break;
+          default:
+            P.VU.elt<float>(vd, vreg_inx, vu_idx, true) = val;
+            break;
+        }
         if (debug_flag) {
             printf("%f ", val);
         }

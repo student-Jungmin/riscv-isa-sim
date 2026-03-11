@@ -13,7 +13,24 @@ for (reg_t vu_idx=0; vu_idx<n_vu; vu_idx++) {
     for (reg_t i = 0; i < vl; ++i) {
         VI_STRIP(i);
         P.VU.vstart->write(i);
-        float val = P.VU.elt<float>(vs, vreg_inx, vu_idx, true);
+        float val;
+        switch (P.VU.vsew) {
+          case e8:
+            val = static_cast<float>(P.VU.elt<int8_t>(vs, vreg_inx, vu_idx));
+            break;
+          case e16: {
+            float16_t fp16 = P.VU.elt<float16_t>(vs, vreg_inx, vu_idx);
+            float32_t fp32 = f16_to_f32(fp16);
+            memcpy(&val, &fp32.v, sizeof(float));
+            break;
+          }
+          case e32:
+            val = P.VU.elt<float>(vs, vreg_inx, vu_idx);
+            break;
+          default:
+            val = 0.0f;
+            break;
+        }
         P.SA->i_serializer_vpush(vu_idx, val);
         if (debug_flag) {
             printf("%f ", val);
