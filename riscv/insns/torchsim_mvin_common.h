@@ -130,8 +130,10 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                             exit(INVALID_SPAD_ACCESS);
                         }
 
-                        if (debug_flag && is_used_vlane)
+                        if (debug_flag && is_used_vlane) {
                             printf("[MOVIN] outerloop_idx: %ld, vlane_idx: %ld, N: %ld, C: %ld, H: %ld, W: %ld\n", outerloop_idx, vlane_idx, n, c, h, w);
+                            printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx\n", d_idx, d_addr, s_addr);
+                        }
 
                         if (indirect_mode && is_used_vlane) {
                             uint64_t indirect_base_addr = P.VU.dma_indirect_addr;
@@ -168,26 +170,40 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                             uint8_t val = is_used_vlane ? MMU.load_uint8(d_addr) : 0;
                             is_sparse_tile &= (val == 0);
                             MMU.store_uint8(s_addr, val);
-                            if (debug_flag && is_used_vlane)
-                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val: %x\n", d_idx, d_addr, s_addr, *((char*)&val));
+                            if (debug_flag && is_used_vlane) {
+                                int8_t as_int = *((int8_t*)&val);
+                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val(hex): 0x%02x, Val(int): %d\n",
+                                       d_idx, d_addr, s_addr, (uint8_t)val, as_int);
+                            }
                         } else if (element_size == 2) {
                             uint16_t val = is_used_vlane ? MMU.load_uint16(d_addr) : 0;
                             is_sparse_tile &= (val == 0);
                             MMU.store_uint16(s_addr, val);
-                            if (debug_flag && is_used_vlane)
-                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val: %x\n", d_idx, d_addr, s_addr, *((short*)&val));
+                            if (debug_flag && is_used_vlane) {
+                                int16_t as_int = *((int16_t*)&val);
+                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val(hex): 0x%04x, Val(int): %d\n",
+                                       d_idx, d_addr, s_addr, (uint16_t)val, as_int);
+                            }
                         } else if (element_size == 4) {
                             uint32_t val = is_used_vlane ? MMU.load_uint32(d_addr) : 0;
                             is_sparse_tile &= ((*((float*)&val) == 0.0) || val == 0);
                             MMU.store_uint32(s_addr, val);
-                            if (debug_flag && is_used_vlane)
-                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val: %f, is_sp: %d\n", d_idx, d_addr, s_addr, *((float*)&val), is_sparse_tile);
+                            if (debug_flag && is_used_vlane) {
+                                int32_t as_int  = *((int32_t*)&val);
+                                float   as_f32  = *((float*)&val);
+                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val(hex): 0x%08x, Val(int): %d, Val(float): %f, is_sp: %d\n",
+                                       d_idx, d_addr, s_addr, val, as_int, as_f32, is_sparse_tile);
+                            }
                         } else if (element_size == 8) {
                             uint64_t val = is_used_vlane ? MMU.load_uint64(d_addr) : 0;
                             is_sparse_tile &= (val == 0);
                             MMU.store_uint64(s_addr, val);
-                            if (debug_flag && is_used_vlane)
-                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val: %f\n", d_idx, d_addr, s_addr, *((double*)&val));
+                            if (debug_flag && is_used_vlane) {
+                                int64_t  as_int  = *((int64_t*)&val);
+                                double   as_f64  = *((double*)&val);
+                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val(hex): 0x%016lx, Val(int): %ld, Val(double): %f\n",
+                                       d_idx, d_addr, s_addr, val, as_int, as_f64);
+                            }
                         }
                     }
                 }

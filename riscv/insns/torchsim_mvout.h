@@ -162,23 +162,37 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                         if (element_size == 1) {
                             uint8_t val = MMU.load_uint8(s_addr);
                             MMU.store_uint8(d_addr, val);
-                            if (debug_flag)
-                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val: %x\n", d_idx, d_addr, s_addr, *((char*)&val));
+                            if (debug_flag) {
+                                int8_t as_int = *((int8_t*)&val);
+                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val(hex): 0x%02x, Val(int): %d\n",
+                                       d_idx, d_addr, s_addr, (uint8_t)val, as_int);
+                            }
                         } else if (element_size == 2) {
                             uint16_t val = MMU.load_uint16(s_addr);
                             MMU.store_uint16(d_addr, val);
-                            if (debug_flag)
-                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val: %x\n", d_idx, d_addr, s_addr, *((short*)&val));
+                            if (debug_flag) {
+                                int16_t as_int = *((int16_t*)&val);
+                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val(hex): 0x%04x, Val(int): %d\n",
+                                       d_idx, d_addr, s_addr, (uint16_t)val, as_int);
+                            }
                         } else if (element_size == 4) {
                             uint32_t val = MMU.load_uint32(s_addr);
                             MMU.store_uint32(d_addr, val);
-                            if (debug_flag)
-                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val: %f\n", d_idx, d_addr, s_addr, *((float*)&val));
+                            if (debug_flag) {
+                                int32_t as_int = *((int32_t*)&val);
+                                float   as_f32 = *((float*)&val);
+                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val(hex): 0x%08x, Val(int): %d, Val(float): %f\n",
+                                       d_idx, d_addr, s_addr, val, as_int, as_f32);
+                            }
                         } else if (element_size == 8) {
                             uint64_t val = MMU.load_uint64(s_addr);
                             MMU.store_uint64(d_addr, val);
-                            if (debug_flag)
-                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val: %f\n", d_idx, d_addr, s_addr, *((double*)&val));
+                            if (debug_flag) {
+                                int64_t as_int = *((int64_t*)&val);
+                                double  as_f64 = *((double*)&val);
+                                printf("- Buffer_idx: %ld, Dram_addr: 0x%lx, Spad_addr: 0x%lx, Val(hex): 0x%016lx, Val(int): %ld, Val(double): %f\n",
+                                       d_idx, d_addr, s_addr, val, as_int, as_f64);
+                            }
                         }
                     }
                 }
