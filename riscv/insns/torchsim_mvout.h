@@ -120,6 +120,10 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                         uint64_t s_addr = scratchpadAddr + s_idx * element_size + vlane_idx * P.VU.vu_sram_byte;
                         uint64_t d_addr = static_cast<uint64_t*>(dma_buffer)[d_idx];
 
+                        /* Skip if the dram_addr is not defined */
+                        if (d_addr == 0)
+                            continue;
+
                         if (scratchpadAddr + s_idx * element_size >= P.VU.sram_v_space.first + P.VU.vu_sram_byte) {
                             fprintf(stderr, "MVOUT ERROR: Scratchpad address overflow: 0x%lx\n", s_addr);
                             exit(INVALID_SPAD_ACCESS);

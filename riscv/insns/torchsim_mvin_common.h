@@ -124,6 +124,7 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                         bool is_used_vlane = vlane_idx < used_vlane;
                         uint64_t s_addr = scratchpadAddr + s_idx * element_size + vlane_idx * P.VU.vu_sram_byte;
                         uint64_t d_addr = is_used_vlane ? static_cast<uint64_t*>(dma_buffer)[d_idx] : 0;
+                        is_used_vlane &= (d_addr != 0);
 
                         if (scratchpadAddr + s_idx * element_size >= P.VU.sram_v_space.first + P.VU.vu_sram_byte) {
                             fprintf(stderr, "MVIN ERROR: Scratchpad address overflow: 0x%lx\n", s_addr);
