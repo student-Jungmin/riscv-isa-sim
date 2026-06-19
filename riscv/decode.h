@@ -2077,25 +2077,25 @@ reg_t index[P.VU.vlmax]; \
   VI_LOOP_ELEMENT_SKIP(); \
     switch (pat) { \
       case 0x21: \
-        P.VU.elt<type##16_t>(rd_num, i, true) = P.VU.elt<type##8_t>(rs2_num, i, vu_idx); \
+        P.VU.elt<type##16_t>(rd_num, i, vu_idx, true) = P.VU.elt<type##8_t>(rs2_num, i, vu_idx); \
         break; \
       case 0x41: \
-        P.VU.elt<type##32_t>(rd_num, i, true) = P.VU.elt<type##8_t>(rs2_num, i, vu_idx); \
+        P.VU.elt<type##32_t>(rd_num, i, vu_idx, true) = P.VU.elt<type##8_t>(rs2_num, i, vu_idx); \
         break; \
       case 0x81: \
-        P.VU.elt<type##64_t>(rd_num, i, true) = P.VU.elt<type##8_t>(rs2_num, i, vu_idx); \
+        P.VU.elt<type##64_t>(rd_num, i, vu_idx, true) = P.VU.elt<type##8_t>(rs2_num, i, vu_idx); \
         break; \
       case 0x42: \
-        P.VU.elt<type##32_t>(rd_num, i, true) = P.VU.elt<type##16_t>(rs2_num, i, vu_idx); \
+        P.VU.elt<type##32_t>(rd_num, i, vu_idx, true) = P.VU.elt<type##16_t>(rs2_num, i, vu_idx); \
         break; \
       case 0x82: \
-        P.VU.elt<type##64_t>(rd_num, i, true) = P.VU.elt<type##16_t>(rs2_num, i, vu_idx); \
+        P.VU.elt<type##64_t>(rd_num, i, vu_idx, true) = P.VU.elt<type##16_t>(rs2_num, i, vu_idx); \
         break; \
       case 0x84: \
-        P.VU.elt<type##64_t>(rd_num, i, true) = P.VU.elt<type##32_t>(rs2_num, i, vu_idx); \
+        P.VU.elt<type##64_t>(rd_num, i, vu_idx, true) = P.VU.elt<type##32_t>(rs2_num, i, vu_idx); \
         break; \
       case 0x88: \
-        P.VU.elt<type##64_t>(rd_num, i, true) = P.VU.elt<type##32_t>(rs2_num, i, vu_idx); \
+        P.VU.elt<type##64_t>(rd_num, i, vu_idx, true) = P.VU.elt<type##32_t>(rs2_num, i, vu_idx); \
         break; \
       default: \
         break; \
