@@ -59,7 +59,7 @@ uint64_t s_outerloop_idx_stride = block_stride[vlane_split_axis] * vlane_stride;
 
 void *dma_buffer = nullptr;
 try {
-    dma_buffer = new uint64_t[buffer_size];
+    dma_buffer = new uint64_t[buffer_size]();   // zero-init: ROUNDUP padding entries stay 0 -> skipped
 } catch (const std::bad_alloc& e) {
     std::cerr << "Memory allocation failed: " << e.what() << std::endl;
     assert(false);
