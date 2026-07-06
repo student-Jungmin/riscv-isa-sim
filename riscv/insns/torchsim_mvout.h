@@ -19,13 +19,37 @@ const uint64_t n_vu = P.VU.get_vu_num();
 
 const reg_t dramAddr = RS1;
 const reg_t scratchpadAddr = RS2;
-const reg_t *p_dim_size = P.VU.dma_dim_size;
-const reg_t *p_mm_stride = P.VU.dma_mm_stride;
-const reg_t *p_spad_stride = P.VU.dma_spad_stride;
-const reg_t element_size = P.VU.dma_element_size;
-const reg_t vlane_stride = P.VU.dma_vlane_stride;
-const int vlane_split_axis = P.VU.dma_vlane_split_axis;
-const bool indirect_mode = P.VU.dma_indirect_mode;
+
+// TMA-style descriptor (see project-dma-descriptor); mvout reads the same struct.
+reg_t desc_dim_size[4], desc_mm_stride[4], desc_spad_stride[4];
+reg_t desc_dim_low[4], desc_dim_high[4];
+reg_t desc_element_size, desc_vlane_stride; int desc_vlane_split_axis; bool desc_indirect;
+reg_t desc_indirect_addr, desc_indirect_stride, desc_indirect_esize; uint64_t desc_fill;
+const reg_t descp = P.VU.dma_desc_ptr;
+for (int i = 0; i < 4; i++) {
+  desc_dim_size[i]   = (int32_t)MMU.load_uint32(descp + 0  + 4*i);
+  desc_dim_low[i]    = (int32_t)MMU.load_uint32(descp + 16 + 4*i);
+  desc_dim_high[i]   = (int32_t)MMU.load_uint32(descp + 32 + 4*i);
+  desc_mm_stride[i]  = (int64_t)MMU.load_uint64(descp + 48 + 8*i);
+  desc_spad_stride[i]= (int64_t)MMU.load_uint64(descp + 80 + 8*i);
+}
+desc_element_size     = MMU.load_uint16(descp + 112);
+desc_vlane_stride     = MMU.load_uint16(descp + 114);
+desc_vlane_split_axis = MMU.load_uint8(descp + 116);
+uint16_t desc_flags   = MMU.load_uint16(descp + 118);
+desc_indirect         = desc_flags & 0x1;
+desc_indirect_addr    = MMU.load_uint64(descp + 120);
+desc_indirect_stride  = MMU.load_uint16(descp + 128);
+desc_indirect_esize   = MMU.load_uint16(descp + 130);
+desc_fill             = MMU.load_uint64(descp + 136);
+
+const reg_t *p_dim_size = desc_dim_size;
+const reg_t *p_mm_stride = desc_mm_stride;
+const reg_t *p_spad_stride = desc_spad_stride;
+const reg_t element_size = desc_element_size;
+const reg_t vlane_stride = desc_vlane_stride;
+const int vlane_split_axis = desc_vlane_split_axis;
+const bool indirect_mode = desc_indirect;
 uint64_t n_outerloop = 1;
 
 if (vlane_split_axis == N)
@@ -133,9 +157,9 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                             printf("[MOVOUT] outerloop_idx: %ld, vlane_idx: %ld, N: %ld, C: %ld, H: %ld, W: %ld\n", outerloop_idx, vlane_idx, n, c, h, w);
 
                         if (indirect_mode) {
-                            uint64_t indirect_base_addr = P.VU.dma_indirect_addr;
-                            uint64_t indirect_stride = P.VU.dma_indirect_stride;
-                            uint64_t indirect_element_size = P.VU.dma_indirect_element_size;
+                            uint64_t indirect_base_addr = desc_indirect_addr;
+                            uint64_t indirect_stride = desc_indirect_stride;
+                            uint64_t indirect_element_size = desc_indirect_esize;
                             uint64_t indirect_addr = indirect_base_addr + s_idx * indirect_element_size + vlane_idx * P.VU.vu_sram_byte;
                             uint64_t indirect_idx = 0;
                             switch(indirect_element_size) {
@@ -210,7 +234,7 @@ if (dma_buffer != nullptr) {
     dma_buffer = nullptr;
 }
 
-if (P.VU.dma_indirect_mode) {
+if (desc_indirect) {
     std::string file_path = std::string(P.base_path) + "/indirect_access/indirect_index" + std::to_string(P.VU.dma_indirect_counter++) + ".raw";
     FILE* fp = fopen(file_path.c_str(), "wb");
     if (!fp) {

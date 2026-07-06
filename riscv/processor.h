@@ -551,20 +551,11 @@ public:
       std::pair<reg_t, reg_t> sram_v_space;
 
       // Config called for every dma operation
-      reg_t dma_dim_size[4] = {0, 0, 0, 0};
-      reg_t dma_mm_stride[4] = {0, 0, 0, 0};
-      reg_t dma_spad_stride[4] = {0, 0, 0, 0};
-      reg_t dma_element_size = 0;
-      reg_t dma_vlane_stride = 0;
       uint64_t dma_counter = 0;
       // For indirect access
-      bool dma_indirect_mode = false;
-      reg_t dma_indirect_addr = 0;
-      reg_t dma_indirect_stride = 0;
-      reg_t dma_indirect_element_size = 1;
       uint64_t dma_indirect_counter = 0;
+      reg_t dma_desc_ptr = 0;                // TMA-style DMA descriptor base (MVIN/MVOUT read the struct)
 
-      int dma_vlane_split_axis;
 
       // VU SRAM
       reg_t vu_sram_byte = 0;
