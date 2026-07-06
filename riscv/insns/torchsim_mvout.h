@@ -38,6 +38,9 @@ desc_vlane_stride     = MMU.load_uint16(descp + 114);
 desc_vlane_split_axis = MMU.load_uint8(descp + 116);
 uint16_t desc_flags   = MMU.load_uint16(descp + 118);
 desc_indirect         = desc_flags & 0x1;
+const bool desc_masked = desc_flags & 0x2;
+const bool desc_accumulate = desc_flags & 0x4;   // index_add: out[d_addr] += val
+const bool desc_acc_float  = desc_flags & 0x8;   // accumulate with float (else integer) add
 desc_indirect_addr    = MMU.load_uint64(descp + 120);
 desc_indirect_stride  = MMU.load_uint16(descp + 128);
 desc_indirect_esize   = MMU.load_uint16(descp + 130);
@@ -127,7 +130,14 @@ for (uint64_t n=0; n<p_dim_size[0]; n++) {
                 uint64_t d_offset = (n * p_mm_stride[0] + c * p_mm_stride[1] + h * p_mm_stride[2] + w * p_mm_stride[3]) * element_size;
                 uint64_t d_addr = dramAddr + d_offset;
                 uint64_t buffer_idx = n * p_dim_size[1] * p_dim_size[2] * p_dim_size[3] + c * p_dim_size[2] * p_dim_size[3] + h * p_dim_size[3] + w;
-                static_cast<uint64_t*>(dma_buffer)[buffer_idx] = d_addr;
+                // masked-DMA tail clamp: positions >= dim_high are the lane-align tail;
+                // sentinel 0 makes the store loop skip them (no OOB write to DRAM).
+                bool in_box = !desc_masked || (
+                    (int64_t)n >= desc_dim_low[0] && (int64_t)n < desc_dim_high[0] &&
+                    (int64_t)c >= desc_dim_low[1] && (int64_t)c < desc_dim_high[1] &&
+                    (int64_t)h >= desc_dim_low[2] && (int64_t)h < desc_dim_high[2] &&
+                    (int64_t)w >= desc_dim_low[3] && (int64_t)w < desc_dim_high[3]);
+                static_cast<uint64_t*>(dma_buffer)[buffer_idx] = in_box ? d_addr : 0;
             }
         }
     }
@@ -189,6 +199,7 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
 
                         if (element_size == 1) {
                             uint8_t val = MMU.load_uint8(s_addr);
+                            if (desc_accumulate) val = (uint8_t)(MMU.load_uint8(d_addr) + val);
                             MMU.store_uint8(d_addr, val);
                             if (debug_flag) {
                                 int8_t as_int = *((int8_t*)&val);
@@ -197,6 +208,13 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                             }
                         } else if (element_size == 2) {
                             uint16_t val = MMU.load_uint16(s_addr);
+                            if (desc_accumulate) {
+                                uint16_t cur = MMU.load_uint16(d_addr);
+                                if (desc_acc_float) {
+                                    float16_t a; a.v = cur; float16_t b; b.v = val;
+                                    val = f16_add(a, b).v;
+                                } else val = (uint16_t)(cur + val);
+                            }
                             MMU.store_uint16(d_addr, val);
                             if (debug_flag) {
                                 int16_t as_int = *((int16_t*)&val);
@@ -205,6 +223,13 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                             }
                         } else if (element_size == 4) {
                             uint32_t val = MMU.load_uint32(s_addr);
+                            if (desc_accumulate) {
+                                uint32_t cur = MMU.load_uint32(d_addr);
+                                if (desc_acc_float) {
+                                    float r = *((float*)&cur) + *((float*)&val);
+                                    val = *((uint32_t*)&r);
+                                } else val = cur + val;
+                            }
                             MMU.store_uint32(d_addr, val);
                             if (debug_flag) {
                                 int32_t as_int = *((int32_t*)&val);
@@ -214,6 +239,13 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                             }
                         } else if (element_size == 8) {
                             uint64_t val = MMU.load_uint64(s_addr);
+                            if (desc_accumulate) {
+                                uint64_t cur = MMU.load_uint64(d_addr);
+                                if (desc_acc_float) {
+                                    double r = *((double*)&cur) + *((double*)&val);
+                                    val = *((uint64_t*)&r);
+                                } else val = cur + val;
+                            }
                             MMU.store_uint64(d_addr, val);
                             if (debug_flag) {
                                 int64_t as_int = *((int64_t*)&val);

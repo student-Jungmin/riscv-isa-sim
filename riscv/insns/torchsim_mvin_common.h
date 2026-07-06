@@ -18,9 +18,10 @@ const uint64_t n_vu = P.VU.get_vu_num();
 const reg_t dramAddr = RS1;
 const reg_t scratchpadAddr = RS2;
 
-// TMA-style descriptor: when dma_desc_ptr is set, read the transfer params from the
-// struct in memory; else fall back to the legacy CONFIG-set VU fields. See
-// project-dma-descriptor (struct offsets). low/high default to [0, dim_size) -> no clamp.
+// TMA-style descriptor: read all transfer params from the struct at dma_desc_ptr
+// (set by CONFIG_DESC). See project-dma-descriptor (struct offsets). dim_low/dim_high
+// default to [0, dim_size) -> no clamp; a masked DMA narrows dim_high to the real
+// tensor extent so the lane-align tail is filled instead of read/written OOB.
 reg_t desc_dim_size[4], desc_mm_stride[4], desc_spad_stride[4];
 reg_t desc_dim_low[4], desc_dim_high[4];
 reg_t desc_element_size, desc_vlane_stride; int desc_vlane_split_axis; bool desc_indirect;
@@ -38,6 +39,7 @@ desc_vlane_stride     = MMU.load_uint16(descp + 114);
 desc_vlane_split_axis = MMU.load_uint8(descp + 116);
 uint16_t desc_flags   = MMU.load_uint16(descp + 118);
 desc_indirect         = desc_flags & 0x1;
+const bool desc_masked = desc_flags & 0x2;
 desc_indirect_addr    = MMU.load_uint64(descp + 120);
 desc_indirect_stride  = MMU.load_uint16(descp + 128);
 desc_indirect_esize   = MMU.load_uint16(descp + 130);
@@ -131,7 +133,14 @@ for (uint64_t n=0; n<p_dim_size[0]; n++) {
                 uint64_t d_offset = (n * p_mm_stride[0] + c * p_mm_stride[1] + h * p_mm_stride[2] + w * p_mm_stride[3]) * element_size;
                 uint64_t d_addr = dramAddr + d_offset;
                 uint64_t buffer_idx = n * p_dim_size[1] * p_dim_size[2] * p_dim_size[3] + c * p_dim_size[2] * p_dim_size[3] + h * p_dim_size[3] + w;
-                static_cast<uint64_t*>(dma_buffer)[buffer_idx] = d_addr;
+                // masked-DMA tail clamp: positions outside [dim_low, dim_high) are the
+                // lane-align tail (or pad) -> sentinel 0 so the store below fills them.
+                bool in_box = !desc_masked || (
+                    (int64_t)n >= desc_dim_low[0] && (int64_t)n < desc_dim_high[0] &&
+                    (int64_t)c >= desc_dim_low[1] && (int64_t)c < desc_dim_high[1] &&
+                    (int64_t)h >= desc_dim_low[2] && (int64_t)h < desc_dim_high[2] &&
+                    (int64_t)w >= desc_dim_low[3] && (int64_t)w < desc_dim_high[3]);
+                static_cast<uint64_t*>(dma_buffer)[buffer_idx] = in_box ? d_addr : 0;
             }
         }
     }
@@ -194,7 +203,7 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                         }
 
                         if (element_size == 1) {
-                            uint8_t val = is_used_vlane ? MMU.load_uint8(d_addr) : 0;
+                            uint8_t val = is_used_vlane ? MMU.load_uint8(d_addr) : (uint8_t)desc_fill;
                             is_sparse_tile &= (val == 0);
                             MMU.store_uint8(s_addr, val);
                             if (debug_flag && is_used_vlane) {
@@ -203,7 +212,7 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                                        d_idx, d_addr, s_addr, (uint8_t)val, as_int);
                             }
                         } else if (element_size == 2) {
-                            uint16_t val = is_used_vlane ? MMU.load_uint16(d_addr) : 0;
+                            uint16_t val = is_used_vlane ? MMU.load_uint16(d_addr) : (uint16_t)desc_fill;
                             is_sparse_tile &= (val == 0);
                             MMU.store_uint16(s_addr, val);
                             if (debug_flag && is_used_vlane) {
@@ -212,7 +221,7 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                                        d_idx, d_addr, s_addr, (uint16_t)val, as_int);
                             }
                         } else if (element_size == 4) {
-                            uint32_t val = is_used_vlane ? MMU.load_uint32(d_addr) : 0;
+                            uint32_t val = is_used_vlane ? MMU.load_uint32(d_addr) : (uint32_t)desc_fill;
                             is_sparse_tile &= ((*((float*)&val) == 0.0) || val == 0);
                             MMU.store_uint32(s_addr, val);
                             if (debug_flag && is_used_vlane) {
@@ -222,7 +231,7 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                                        d_idx, d_addr, s_addr, val, as_int, as_f32, is_sparse_tile);
                             }
                         } else if (element_size == 8) {
-                            uint64_t val = is_used_vlane ? MMU.load_uint64(d_addr) : 0;
+                            uint64_t val = is_used_vlane ? MMU.load_uint64(d_addr) : (uint64_t)desc_fill;
                             is_sparse_tile &= (val == 0);
                             MMU.store_uint64(s_addr, val);
                             if (debug_flag && is_used_vlane) {
