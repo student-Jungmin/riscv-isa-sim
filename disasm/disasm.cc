@@ -790,6 +790,8 @@ disassembler_t::disassembler_t(int xlen)
   //DEFINE_RTYPE(torchsim_vexp2);
   DEFINE_RTYPE(torchsim_verf);
   DEFINE_RTYPE(torchsim_vtanh);
+  DEFINE_RTYPE(torchsim_vlog);
+  DEFINE_RTYPE(torchsim_vatan);
   DEFINE_RTYPE(torchsim_vsin);
   DEFINE_RTYPE(torchsim_vcos);
   DEFINE_RTYPE(torchsim_vlane_idx);

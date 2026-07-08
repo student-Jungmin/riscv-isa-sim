@@ -135,6 +135,8 @@ riscv_insn_ext_i = \
 	torchsim_vexp \
 	torchsim_verf \
 	torchsim_vtanh \
+	torchsim_vlog \
+	torchsim_vatan \
 	torchsim_vsin \
 	torchsim_vcos \
 	torchsim_vlane_idx \
