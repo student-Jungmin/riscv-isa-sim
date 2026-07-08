@@ -21,8 +21,11 @@ for (reg_t vu_idx=0; vu_idx<n_vu; vu_idx++) {
         } else if (P.VU.vsew == e32) {
             float val = P.VU.elt<float>(vs, vreg_inx, vu_idx);
             P.VU.elt<float>(vd, vreg_inx, vu_idx, true) = atanf(val);
+        } else if (P.VU.vsew == e64) {
+            double val = P.VU.elt<double>(vs, vreg_inx, vu_idx);
+            P.VU.elt<double>(vd, vreg_inx, vu_idx, true) = atan(val);
         } else {
-            fprintf(stderr, "[torchsim_vatan] Unsupported vsew=%ld (only e16/e32 supported)\n", P.VU.vsew);
+            fprintf(stderr, "[torchsim_vatan] Unsupported vsew=%ld (only e16/e32/e64 supported)\n", P.VU.vsew);
             require(0);
         }
     }
