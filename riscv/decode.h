@@ -316,6 +316,8 @@ class wait_for_interrupt_t {};
 #define invalid_pc(pc) ((pc) & 1)
 
 /* Convenience wrappers to simplify softfloat code sequences */
+#define isBoxedF8(r) (isBoxedF16(r) && ((uint64_t)((r.v[0] >> 8) + 1) == ((uint64_t)1 << 56)))
+#define unboxF8(r) (isBoxedF8(r) ? (uint8_t)r.v[0] : defaultNaNF8UI)
 #define isBoxedF16(r) (isBoxedF32(r) && ((uint64_t)((r.v[0] >> 16) + 1) == ((uint64_t)1 << 48)))
 #define unboxF16(r) (isBoxedF16(r) ? (uint16_t)r.v[0] : defaultNaNF16UI)
 #define isBoxedF32(r) (isBoxedF64(r) && ((uint32_t)((r.v[0] >> 32) + 1) == 0))
@@ -323,20 +325,28 @@ class wait_for_interrupt_t {};
 #define isBoxedF64(r) ((r.v[1] + 1) == 0)
 #define unboxF64(r) (isBoxedF64(r) ? r.v[0] : defaultNaNF64UI)
 typedef float128_t freg_t;
+inline float8_t f8(uint8_t v) { return { v }; }
 inline float16_t f16(uint16_t v) { return { v }; }
 inline float32_t f32(uint32_t v) { return { v }; }
 inline float64_t f64(uint64_t v) { return { v }; }
+inline float8_t f8(freg_t r) { return f8(unboxF8(r)); }
 inline float16_t f16(freg_t r) { return f16(unboxF16(r)); }
 inline float32_t f32(freg_t r) { return f32(unboxF32(r)); }
 inline float64_t f64(freg_t r) { return f64(unboxF64(r)); }
 inline float128_t f128(freg_t r) { return r; }
+inline freg_t freg(float8_t f) { return { ((uint64_t)-1 << 8) | f.v, (uint64_t)-1 }; }
 inline freg_t freg(float16_t f) { return { ((uint64_t)-1 << 16) | f.v, (uint64_t)-1 }; }
 inline freg_t freg(float32_t f) { return { ((uint64_t)-1 << 32) | f.v, (uint64_t)-1 }; }
 inline freg_t freg(float64_t f) { return { f.v, (uint64_t)-1 }; }
 inline freg_t freg(float128_t f) { return f; }
+#define F8_SIGN ((uint8_t)1 << 7)
 #define F16_SIGN ((uint16_t)1 << 15)
 #define F32_SIGN ((uint32_t)1 << 31)
 #define F64_SIGN ((uint64_t)1 << 63)
+/* The outer cast is needed where the wider forms do not: uint8_t promotes to int
+   under ~ and |, so the result would not fit f8()'s parameter without it. */
+#define fsgnj8(a, b, n, x) \
+  f8((uint8_t)((f8(a).v & ~F8_SIGN) | ((((x) ? f8(a).v : (n) ? F8_SIGN : 0) ^ f8(b).v) & F8_SIGN)))
 #define fsgnj16(a, b, n, x) \
   f16((f16(a).v & ~F16_SIGN) | ((((x) ? f16(a).v : (n) ? F16_SIGN : 0) ^ f16(b).v) & F16_SIGN))
 #define fsgnj32(a, b, n, x) \
@@ -1043,7 +1053,10 @@ static inline bool is_aligned(const unsigned val, const unsigned pos)
 #define VI_VF_MERGE_LOOP(BODY) \
   VI_CHECK_SSS(false); \
   VI_MERGE_LOOP_BASE \
-  if(sew == e16){ \
+  if(sew == e8){ \
+    VFP_VF_PARAMS(8); \
+    BODY; \
+  }else if(sew == e16){ \
     VFP_VF_PARAMS(16); \
     BODY; \
   }else if(sew == e32){ \
@@ -2105,9 +2118,13 @@ reg_t index[P.VU.vlmax]; \
 //
 // vector: vfp helper
 //
+/* fp8Format is injected per instruction from the descriptor's dtype byte, the way
+   roundingMode is injected from frm. Without it an e8 arm would run on whatever
+   the last torchsim vpush/vpop happened to leave in the global. */
 #define VI_VFP_COMMON \
   require_fp; \
-  require((P.VU.vsew == e16 && p->extension_enabled(EXT_ZFH)) || \
+  require((P.VU.vsew == e8 && p->extension_enabled(EXT_ZVFP8)) || \
+          (P.VU.vsew == e16 && p->extension_enabled(EXT_ZFH)) || \
           (P.VU.vsew == e32 && p->extension_enabled('F')) || \
           (P.VU.vsew == e64 && p->extension_enabled('D'))); \
   require_vector(true);\
@@ -2116,7 +2133,9 @@ reg_t index[P.VU.vlmax]; \
   reg_t rd_num = insn.rd(); \
   reg_t rs1_num = insn.rs1(); \
   reg_t rs2_num = insn.rs2(); \
-  softfloat_roundingMode = STATE.frm->read();
+  softfloat_roundingMode = STATE.frm->read(); \
+  softfloat_fp8Format = (P.VU.elem_dtype == ELEM_DTYPE_FP8E5M2) \
+                        ? softfloat_fp8_e5m2 : softfloat_fp8_e4m3;
 
 #define VI_VFP_LOOP_BASE \
   VI_VFP_COMMON \
@@ -2166,6 +2185,19 @@ reg_t index[P.VU.vlmax]; \
   if (vl > 0) { \
     if (is_propagate && !is_active) { \
       switch (x) { \
+        case e8: {\
+            auto ret = f8_classify(f8(vd_0.v)); \
+            if (ret & 0x300) { \
+              if (ret & 0x100) { \
+                softfloat_exceptionFlags |= softfloat_flag_invalid; \
+                set_fp_exceptions; \
+              } \
+              P.VU.elt<uint8_t>(rd_num, 0, vu_idx, true) = defaultNaNF8UI; \
+            } else { \
+              P.VU.elt<uint8_t>(rd_num, 0, vu_idx, true) = vd_0.v; \
+            } \
+          } \
+          break; \
         case e16: {\
             auto ret = f16_classify(f16(vd_0.v)); \
             if (ret & 0x300) { \
@@ -2213,6 +2245,7 @@ reg_t index[P.VU.vlmax]; \
 
 #define VI_VFP_LOOP_CMP_END \
     switch(P.VU.vsew) { \
+      case e8: \
       case e16: \
       case e32: \
       case e64: { \
@@ -2227,10 +2260,106 @@ reg_t index[P.VU.vlmax]; \
   } \
   P.VU.vstart->write(0);
 
-#define VI_VFP_VV_LOOP(BODY16, BODY32, BODY64) \
+// fp8 (SEW=8) opt-in.  An instruction joins by appending one extra body to the
+// VI_VFP_* macro; VI_VFP_E8_OPT then emits ARM(BODY8).  Omit it and nothing is
+// emitted, so e8 lands on the switch's default and traps with require(0).
+#define VI_VFP_E8_PICK(_0, _1, NAME, ...) NAME
+#define VI_VFP_E8_NONE()
+#define VI_VFP_E8_OPT(ARM, ...) \
+  VI_VFP_E8_PICK(0, ##__VA_ARGS__, ARM, VI_VFP_E8_NONE)(__VA_ARGS__)
+
+#define VI_VFP_E8_V_ARM(BODY8) \
+    case e8: { \
+      VFP_V_PARAMS(8); \
+      BODY8; \
+      set_fp_exceptions; \
+      break; \
+    }
+
+#define VI_VFP_E8_VV_ARM(BODY8) \
+    case e8: { \
+      VFP_VV_PARAMS(8); \
+      BODY8; \
+      set_fp_exceptions; \
+      break; \
+    }
+
+#define VI_VFP_E8_VF_ARM(BODY8) \
+    case e8: { \
+      VFP_VF_PARAMS(8); \
+      BODY8; \
+      set_fp_exceptions; \
+      break; \
+    }
+
+#define VI_VFP_E8_VV_WIDE_ARM(BODY8) \
+    case e8: { \
+      float16_t &vd = P.VU.elt<float16_t>(rd_num, i, vu_idx, true); \
+      float16_t vs2 = f8_to_f16(P.VU.elt<float8_t>(rs2_num, i, vu_idx)); \
+      float16_t vs1 = f8_to_f16(P.VU.elt<float8_t>(rs1_num, i, vu_idx)); \
+      BODY8; \
+      set_fp_exceptions; \
+      break; \
+    }
+
+#define VI_VFP_E8_VF_WIDE_ARM(BODY8) \
+    case e8: { \
+      float16_t &vd = P.VU.elt<float16_t>(rd_num, i, vu_idx, true); \
+      float16_t vs2 = f8_to_f16(P.VU.elt<float8_t>(rs2_num, i, vu_idx)); \
+      float16_t rs1 = f8_to_f16(f8(READ_FREG(rs1_num))); \
+      BODY8; \
+      set_fp_exceptions; \
+      break; \
+    }
+
+#define VI_VFP_E8_WV_WIDE_ARM(BODY8) \
+    case e8: { \
+      float16_t &vd = P.VU.elt<float16_t>(rd_num, i, vu_idx, true); \
+      float16_t vs2 = P.VU.elt<float16_t>(rs2_num, i, vu_idx); \
+      float16_t vs1 = f8_to_f16(P.VU.elt<float8_t>(rs1_num, i, vu_idx)); \
+      BODY8; \
+      set_fp_exceptions; \
+      break; \
+    }
+
+#define VI_VFP_E8_WF_WIDE_ARM(BODY8) \
+    case e8: { \
+      float16_t &vd = P.VU.elt<float16_t>(rd_num, i, vu_idx, true); \
+      float16_t vs2 = P.VU.elt<float16_t>(rs2_num, i, vu_idx); \
+      float16_t rs1 = f8_to_f16(f8(READ_FREG(rs1_num))); \
+      BODY8; \
+      set_fp_exceptions; \
+      break; \
+    }
+
+#define VI_VFP_E8_REDUCTION_ARM(BODY8) \
+    case e8: { \
+      VI_VFP_LOOP_REDUCTION_BASE(8) \
+        BODY8; \
+        set_fp_exceptions; \
+      VI_VFP_LOOP_REDUCTION_END(e8) \
+      } \
+      break; \
+    }
+
+#define VI_VFP_E8_WIDE_REDUCTION_ARM(BODY8) \
+      case e8: { \
+        float16_t vd_0 = P.VU.elt<float16_t>(rs1_num, 0, vu_idx); \
+        for (reg_t i=P.VU.vstart->read(); i<vl; ++i) { \
+          VI_LOOP_ELEMENT_SKIP(); \
+          is_active = true; \
+          float16_t vs2 = f8_to_f16(P.VU.elt<float8_t>(rs2_num, i, vu_idx)); \
+          BODY8; \
+          set_fp_exceptions; \
+        VI_VFP_LOOP_REDUCTION_END(e16) \
+        break; \
+      }
+
+#define VI_VFP_VV_LOOP(BODY16, BODY32, BODY64, ...) \
   VI_CHECK_SSS(true); \
   VI_VFP_LOOP_BASE \
   switch(P.VU.vsew) { \
+    VI_VFP_E8_OPT(VI_VFP_E8_VV_ARM, ##__VA_ARGS__) \
     case e16: {\
       VFP_VV_PARAMS(16); \
       BODY16; \
@@ -2256,10 +2385,11 @@ reg_t index[P.VU.vlmax]; \
   DEBUG_RVV_FP_VV; \
   VI_VFP_LOOP_END
 
-#define VI_VFP_V_LOOP(BODY16, BODY32, BODY64) \
+#define VI_VFP_V_LOOP(BODY16, BODY32, BODY64, ...) \
   VI_CHECK_SSS(false); \
   VI_VFP_LOOP_BASE \
   switch(P.VU.vsew) { \
+    VI_VFP_E8_OPT(VI_VFP_E8_V_ARM, ##__VA_ARGS__) \
     case e16: {\
       VFP_V_PARAMS(16); \
       BODY16; \
@@ -2282,10 +2412,11 @@ reg_t index[P.VU.vlmax]; \
   set_fp_exceptions; \
   VI_VFP_LOOP_END
 
-#define VI_VFP_VV_LOOP_REDUCTION(BODY16, BODY32, BODY64) \
+#define VI_VFP_VV_LOOP_REDUCTION(BODY16, BODY32, BODY64, ...) \
   VI_CHECK_REDUCTION(false) \
   VI_VFP_COMMON \
   switch(P.VU.vsew) { \
+    VI_VFP_E8_OPT(VI_VFP_E8_REDUCTION_ARM, ##__VA_ARGS__) \
     case e16: {\
       VI_VFP_LOOP_REDUCTION_BASE(16) \
         BODY16; \
@@ -2315,15 +2446,17 @@ reg_t index[P.VU.vlmax]; \
       break; \
   }; \
 
-#define VI_VFP_VV_LOOP_WIDE_REDUCTION(BODY16, BODY32) \
+#define VI_VFP_VV_LOOP_WIDE_REDUCTION(BODY16, BODY32, ...) \
   VI_CHECK_REDUCTION(true) \
   VI_VFP_COMMON \
-  require((P.VU.vsew == e16 && p->extension_enabled('F')) || \
+  require((P.VU.vsew == e8 && p->extension_enabled(EXT_ZFH)) || \
+          (P.VU.vsew == e16 && p->extension_enabled('F')) || \
           (P.VU.vsew == e32 && p->extension_enabled('D'))); \
   bool is_active = false; \
   const reg_t n_vu = P.get_kernel_flag() ? P.VU.get_vu_num() : 1; \
   for (reg_t vu_idx=0; vu_idx<n_vu; vu_idx++) { \
     switch(P.VU.vsew) { \
+      VI_VFP_E8_OPT(VI_VFP_E8_WIDE_REDUCTION_ARM, ##__VA_ARGS__) \
       case e16: {\
         float32_t vd_0 = P.VU.elt<float32_t>(rs1_num, 0, vu_idx); \
         for (reg_t i=P.VU.vstart->read(); i<vl; ++i) { \
@@ -2352,10 +2485,11 @@ reg_t index[P.VU.vlmax]; \
     }; \
   }
 
-#define VI_VFP_VF_LOOP(BODY16, BODY32, BODY64) \
+#define VI_VFP_VF_LOOP(BODY16, BODY32, BODY64, ...) \
   VI_CHECK_SSS(false); \
   VI_VFP_LOOP_BASE \
   switch(P.VU.vsew) { \
+    VI_VFP_E8_OPT(VI_VFP_E8_VF_ARM, ##__VA_ARGS__) \
     case e16: {\
       VFP_VF_PARAMS(16); \
       BODY16; \
@@ -2381,10 +2515,11 @@ reg_t index[P.VU.vlmax]; \
   DEBUG_RVV_FP_VF; \
   VI_VFP_LOOP_END
 
-#define VI_VFP_VV_LOOP_CMP(BODY16, BODY32, BODY64) \
+#define VI_VFP_VV_LOOP_CMP(BODY16, BODY32, BODY64, ...) \
   VI_CHECK_MSS(true); \
   VI_VFP_LOOP_CMP_BASE \
   switch(P.VU.vsew) { \
+    VI_VFP_E8_OPT(VI_VFP_E8_VV_ARM, ##__VA_ARGS__) \
     case e16: {\
       VFP_VV_PARAMS(16); \
       BODY16; \
@@ -2409,10 +2544,11 @@ reg_t index[P.VU.vlmax]; \
   }; \
   VI_VFP_LOOP_CMP_END \
 
-#define VI_VFP_VF_LOOP_CMP(BODY16, BODY32, BODY64) \
+#define VI_VFP_VF_LOOP_CMP(BODY16, BODY32, BODY64, ...) \
   VI_CHECK_MSS(false); \
   VI_VFP_LOOP_CMP_BASE \
   switch(P.VU.vsew) { \
+    VI_VFP_E8_OPT(VI_VFP_E8_VF_ARM, ##__VA_ARGS__) \
     case e16: {\
       VFP_VF_PARAMS(16); \
       BODY16; \
@@ -2437,10 +2573,18 @@ reg_t index[P.VU.vlmax]; \
   }; \
   VI_VFP_LOOP_CMP_END \
 
-#define VI_VFP_VF_LOOP_WIDE(BODY16, BODY32) \
+/* An e8 widening arm writes an f16 destination, so Zfh has to be on -- the same
+   check VI_VFP_VV_LOOP_WIDE_REDUCTION already carries. Guards e8 only, so the
+   e16/e32/e64 arms keep whatever gating they had. */
+#define VI_VFP_E8_REQUIRE_WIDE_DEST \
+  require((P.VU.vsew != e8) || p->extension_enabled(EXT_ZFH)); \
+
+#define VI_VFP_VF_LOOP_WIDE(BODY16, BODY32, ...) \
   VI_CHECK_DSS(false); \
+  VI_VFP_E8_REQUIRE_WIDE_DEST \
   VI_VFP_LOOP_BASE \
   switch(P.VU.vsew) { \
+    VI_VFP_E8_OPT(VI_VFP_E8_VF_WIDE_ARM, ##__VA_ARGS__) \
     case e16: { \
       float32_t &vd = P.VU.elt<float32_t>(rd_num, i, vu_idx, true); \
       float32_t vs2 = f16_to_f32(P.VU.elt<float16_t>(rs2_num, i, vu_idx)); \
@@ -2465,10 +2609,12 @@ reg_t index[P.VU.vlmax]; \
   VI_VFP_LOOP_END
 
 
-#define VI_VFP_VV_LOOP_WIDE(BODY16, BODY32) \
+#define VI_VFP_VV_LOOP_WIDE(BODY16, BODY32, ...) \
   VI_CHECK_DSS(true); \
+  VI_VFP_E8_REQUIRE_WIDE_DEST \
   VI_VFP_LOOP_BASE \
   switch(P.VU.vsew) { \
+    VI_VFP_E8_OPT(VI_VFP_E8_VV_WIDE_ARM, ##__VA_ARGS__) \
     case e16: {\
       float32_t &vd = P.VU.elt<float32_t>(rd_num, i, vu_idx, true); \
       float32_t vs2 = f16_to_f32(P.VU.elt<float16_t>(rs2_num, i, vu_idx)); \
@@ -2492,10 +2638,12 @@ reg_t index[P.VU.vlmax]; \
   DEBUG_RVV_FP_VV; \
   VI_VFP_LOOP_END
 
-#define VI_VFP_WF_LOOP_WIDE(BODY16, BODY32) \
+#define VI_VFP_WF_LOOP_WIDE(BODY16, BODY32, ...) \
   VI_CHECK_DDS(false); \
+  VI_VFP_E8_REQUIRE_WIDE_DEST \
   VI_VFP_LOOP_BASE \
   switch(P.VU.vsew) { \
+    VI_VFP_E8_OPT(VI_VFP_E8_WF_WIDE_ARM, ##__VA_ARGS__) \
     case e16: {\
       float32_t &vd = P.VU.elt<float32_t>(rd_num, i, vu_idx, true); \
       float32_t vs2 = P.VU.elt<float32_t>(rs2_num, i, vu_idx); \
@@ -2518,10 +2666,12 @@ reg_t index[P.VU.vlmax]; \
   DEBUG_RVV_FP_VV; \
   VI_VFP_LOOP_END
 
-#define VI_VFP_WV_LOOP_WIDE(BODY16, BODY32) \
+#define VI_VFP_WV_LOOP_WIDE(BODY16, BODY32, ...) \
   VI_CHECK_DDS(true); \
+  VI_VFP_E8_REQUIRE_WIDE_DEST \
   VI_VFP_LOOP_BASE \
   switch(P.VU.vsew) { \
+    VI_VFP_E8_OPT(VI_VFP_E8_WV_WIDE_ARM, ##__VA_ARGS__) \
     case e16: {\
       float32_t &vd = P.VU.elt<float32_t>(rd_num, i, vu_idx, true); \
       float32_t vs2 = P.VU.elt<float32_t>(rs2_num, i, vu_idx); \
@@ -2544,10 +2694,17 @@ reg_t index[P.VU.vlmax]; \
   DEBUG_RVV_FP_VV; \
   VI_VFP_LOOP_END
 
+// Used by VI_VFP_CVT_SCALE only, where vsew names the *narrow* side of a
+// widen/narrow convert.  Its e8 arm is an 8-bit integer operand paired with an
+// f16 float side, so it is gated on Zfh -- it is not fp8 and Zvfp8 has no say.
+/* At e8 this macro's narrow side is either an 8-bit integer beside f16 (needs
+   Zfh) or an fp8 (needs Zvfp8). Admit both here; every instruction's own CHECK8
+   already requires the one it actually uses, so the pair stays exact. */
 #define VI_VFP_LOOP_SCALE_BASE \
   require_fp; \
   require_vector(true);\
-  require((P.VU.vsew == e8 && p->extension_enabled(EXT_ZFH)) || \
+  require((P.VU.vsew == e8 && (p->extension_enabled(EXT_ZFH) || \
+                               p->extension_enabled(EXT_ZVFP8))) || \
           (P.VU.vsew == e16 && p->extension_enabled('F')) || \
           (P.VU.vsew == e32 && p->extension_enabled('D'))); \
   require(STATE.frm->read() < 0x5);\
@@ -2556,6 +2713,8 @@ reg_t index[P.VU.vlmax]; \
   reg_t rs1_num = insn.rs1(); \
   reg_t rs2_num = insn.rs2(); \
   softfloat_roundingMode = STATE.frm->read(); \
+  softfloat_fp8Format = (P.VU.elem_dtype == ELEM_DTYPE_FP8E5M2) \
+                        ? softfloat_fp8_e5m2 : softfloat_fp8_e4m3; \
   const reg_t n_vu = P.get_kernel_flag() ? P.VU.get_vu_num() : 1; \
   for (reg_t i=P.VU.vstart->read(); i<vl; ++i){ \
     for (reg_t vu_idx=0; vu_idx<n_vu; vu_idx++) { \

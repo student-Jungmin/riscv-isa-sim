@@ -265,6 +265,10 @@ void processor_t::parse_isa_string(const char* str)
       extension_table[EXT_ZFHMIN] = true;
       if (ext_str == "zfh")
         extension_table[EXT_ZFH] = true;
+    } else if (ext_str == "zvfp8") {
+      if (!((max_isa >> ('v' - 'a')) & 1))
+        bad_isa_string(str, "'zvfp8' extension requires 'V'");
+      extension_table[EXT_ZVFP8] = true;
     } else if (ext_str == "zicsr") {
       // Spike necessarily has Zicsr, because
       // Zicsr is implied by the privileged architecture
