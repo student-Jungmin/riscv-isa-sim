@@ -16,7 +16,18 @@ for (reg_t vu_idx=0; vu_idx<n_vu; vu_idx++) {
         float val;
         switch (P.VU.vsew) {
           case e8:
-            val = static_cast<float>(P.VU.elt<int8_t>(vs, vreg_inx, vu_idx));
+            // Only the two known fp8 codes take the float path. Byte 117 was
+            // descriptor padding, so a pre-fp8 producer can leave anything there
+            // and anything unrecognised has to keep meaning int8.
+            if (P.VU.elem_dtype == ELEM_DTYPE_FP8E4M3 ||
+                P.VU.elem_dtype == ELEM_DTYPE_FP8E5M2) {
+              softfloat_fp8Format = (P.VU.elem_dtype == ELEM_DTYPE_FP8E5M2)
+                                    ? softfloat_fp8_e5m2 : softfloat_fp8_e4m3;
+              float32_t fp32 = f8_to_f32(P.VU.elt<float8_t>(vs, vreg_inx, vu_idx));
+              memcpy(&val, &fp32.v, sizeof(float));
+            } else {
+              val = static_cast<float>(P.VU.elt<int8_t>(vs, vreg_inx, vu_idx));
+            }
             break;
           case e16: {
             float16_t fp16 = P.VU.elt<float16_t>(vs, vreg_inx, vu_idx);
