@@ -4,6 +4,11 @@ VI_CHECK_SLIDE(true);
 VI_VFP_LOOP_BASE
 if (i != 0) {
   switch (P.VU.vsew) {
+    case e8: {
+      VI_XI_SLIDEUP_PARAMS(e8, 1);
+      vd = vs2;
+    }
+    break;
     case e16: {
       VI_XI_SLIDEUP_PARAMS(e16, 1);
       vd = vs2;
@@ -22,6 +27,9 @@ if (i != 0) {
   }
 } else {
   switch (P.VU.vsew) {
+    case e8:
+      P.VU.elt<float8_t>(rd_num, 0, vu_idx, true) = f8(FRS1);
+      break;
     case e16:
       P.VU.elt<float16_t>(rd_num, 0, vu_idx, true) = f16(FRS1);
       break;

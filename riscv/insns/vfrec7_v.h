@@ -8,4 +8,7 @@ VI_VFP_V_LOOP
 },
 {
   vd = f64_recip7(vs2);
+},
+{
+  vd = f8_recip7(vs2);
 })

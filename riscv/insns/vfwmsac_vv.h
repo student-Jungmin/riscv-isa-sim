@@ -5,4 +5,7 @@ VI_VFP_VV_LOOP_WIDE
 },
 {
   vd = f64_mulAdd(vs1, vs2, f64(vd.v ^ F64_SIGN));
+},
+{
+  vd = f16_mulAdd(vs1, vs2, f16(vd.v ^ F16_SIGN));
 })

@@ -8,4 +8,7 @@ VI_VFP_VV_LOOP
 },
 {
   vd = f64_mul(vs1, vs2);
+},
+{
+  vd = f8_mul(vs1, vs2);
 })

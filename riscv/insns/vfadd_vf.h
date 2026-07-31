@@ -8,4 +8,7 @@ VI_VFP_VF_LOOP
 },
 {
   vd = f64_add(rs1, vs2);
+},
+{
+  vd = f8_add(rs1, vs2);
 })

@@ -9,4 +9,7 @@ VI_VFP_VV_LOOP_REDUCTION
 },
 {
   vd_0 = f64_max(vd_0, vs2);
+},
+{
+  vd_0 = f8_max(vd_0, vs2);
 })

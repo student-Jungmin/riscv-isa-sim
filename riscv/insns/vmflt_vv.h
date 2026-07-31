@@ -8,4 +8,7 @@ VI_VFP_VV_LOOP_CMP
 },
 {
   res = f64_lt(vs2, vs1);
+},
+{
+  res = f8_lt(vs2, vs1);
 })

@@ -8,4 +8,7 @@ VI_VFP_V_LOOP
 },
 {
   vd = f64_sqrt(vs2);
+},
+{
+  vd = f8_sqrt(vs2);
 })

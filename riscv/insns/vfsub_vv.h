@@ -8,4 +8,7 @@ VI_VFP_VV_LOOP
 },
 {
   vd = f64_sub(vs2, vs1);
+},
+{
+  vd = f8_sub(vs2, vs1);
 })

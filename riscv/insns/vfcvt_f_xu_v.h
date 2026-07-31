@@ -11,4 +11,8 @@ VI_VFP_VF_LOOP
 {
   auto vs2_u = P.VU.elt<uint64_t>(rs2_num, i, vu_idx);
   vd = ui64_to_f64(vs2_u);
+},
+{
+  auto vs2_u = P.VU.elt<uint8_t>(rs2_num, i, vu_idx);
+  vd = ui32_to_f8(vs2_u);
 })

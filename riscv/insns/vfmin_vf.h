@@ -8,4 +8,7 @@ VI_VFP_VF_LOOP
 },
 {
   vd = f64_min(vs2, rs1);
+},
+{
+  vd = f8_min(vs2, rs1);
 })

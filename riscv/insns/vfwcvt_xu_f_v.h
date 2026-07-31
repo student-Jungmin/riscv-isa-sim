@@ -1,7 +1,10 @@
 // vfwcvt.xu.f.v vd, vs2, vm
 VI_VFP_CVT_SCALE
 ({
-  ;
+  // vsew names the narrow side, so e8 is an fp8 source paired with the
+  // 2*SEW=16-bit unsigned integer destination.
+  auto vs2 = P.VU.elt<float8_t>(rs2_num, i, vu_idx);
+  P.VU.elt<uint16_t>(rd_num, i, vu_idx, true) = f8_to_ui16(vs2, STATE.frm->read(), true);
 },
 {
   auto vs2 = P.VU.elt<float16_t>(rs2_num, i, vu_idx);
@@ -12,7 +15,9 @@ VI_VFP_CVT_SCALE
   P.VU.elt<uint64_t>(rd_num, i, vu_idx, true) = f32_to_ui64(vs2, STATE.frm->read(), true);
 },
 {
-  ;
+  // No f16 is involved, but the loop base also requires Zfh at e8; removing
+  // that would mean editing decode.h, so this path is Zfh-gated too.
+  require(p->extension_enabled(EXT_ZVFP8));
 },
 {
   require(p->extension_enabled(EXT_ZFH));
@@ -20,4 +25,4 @@ VI_VFP_CVT_SCALE
 {
   require(p->extension_enabled('F'));
 },
-true, (P.VU.vsew >= 16))
+true, (P.VU.vsew >= 8))

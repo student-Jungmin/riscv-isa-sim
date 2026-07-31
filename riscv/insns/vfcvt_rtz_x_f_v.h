@@ -8,4 +8,7 @@ VI_VFP_VF_LOOP
 },
 {
   P.VU.elt<int64_t>(rd_num, i, vu_idx) = f64_to_i64(vs2, softfloat_round_minMag, true);
+},
+{
+  P.VU.elt<int8_t>(rd_num, i, vu_idx) = f8_to_i8(vs2, softfloat_round_minMag, true);
 })
