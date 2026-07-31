@@ -47,6 +47,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 | the types below may, if desired, be defined as aliases for the native types
 | (typically 'float' and 'double', and possibly 'long double').
 *----------------------------------------------------------------------------*/
+/*----------------------------------------------------------------------------
+| E4M3 and E5M2 share this type; 'softfloat_fp8Format' says which is in effect.
+*----------------------------------------------------------------------------*/
+typedef struct { uint8_t v; } float8_t;
 typedef struct { uint16_t v; } float16_t;
 typedef struct { uint32_t v; } float32_t;
 typedef struct { uint64_t v; } float64_t;

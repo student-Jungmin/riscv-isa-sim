@@ -82,6 +82,16 @@ enum {
 };
 
 /*----------------------------------------------------------------------------
+| Which OCP fp8 format 'float8_t' denotes.  Travels beside the value like the
+| rounding mode does; spike sets it from the descriptor's dtype byte.
+*----------------------------------------------------------------------------*/
+extern THREAD_LOCAL uint_fast8_t softfloat_fp8Format;
+enum {
+    softfloat_fp8_e4m3 = 0,
+    softfloat_fp8_e5m2 = 1
+};
+
+/*----------------------------------------------------------------------------
 | Software floating-point exception flags.
 *----------------------------------------------------------------------------*/
 extern THREAD_LOCAL uint_fast8_t softfloat_exceptionFlags;
@@ -137,6 +147,58 @@ float128_t i64_to_f128( int64_t );
 #endif
 void i64_to_extF80M( int64_t, extFloat80_t * );
 void i64_to_f128M( int64_t, float128_t * );
+
+/*----------------------------------------------------------------------------
+| 8-bit floating-point operations, in the format 'softfloat_fp8Format' selects.
+| Arithmetic goes through f32 and rounds once; f32's 24 bits clear the 2p+2
+| that makes that double rounding innocuous for both formats (p is 4 and 3).
+*----------------------------------------------------------------------------*/
+uint_fast8_t f8_to_ui8( float8_t, uint_fast8_t, bool );
+uint_fast16_t f8_to_ui16( float8_t, uint_fast8_t, bool );
+uint_fast32_t f8_to_ui32( float8_t, uint_fast8_t, bool );
+uint_fast64_t f8_to_ui64( float8_t, uint_fast8_t, bool );
+int_fast8_t f8_to_i8( float8_t, uint_fast8_t, bool );
+int_fast16_t f8_to_i16( float8_t, uint_fast8_t, bool );
+int_fast32_t f8_to_i32( float8_t, uint_fast8_t, bool );
+int_fast64_t f8_to_i64( float8_t, uint_fast8_t, bool );
+uint_fast32_t f8_to_ui32_r_minMag( float8_t, bool );
+uint_fast64_t f8_to_ui64_r_minMag( float8_t, bool );
+int_fast32_t f8_to_i32_r_minMag( float8_t, bool );
+int_fast64_t f8_to_i64_r_minMag( float8_t, bool );
+float16_t f8_to_f16( float8_t );
+float32_t f8_to_f32( float8_t );
+float64_t f8_to_f64( float8_t );
+float8_t f8_roundToInt( float8_t, uint_fast8_t, bool );
+float8_t f8_add( float8_t, float8_t );
+float8_t f8_sub( float8_t, float8_t );
+float8_t f8_max( float8_t, float8_t );
+float8_t f8_min( float8_t, float8_t );
+float8_t f8_mul( float8_t, float8_t );
+float8_t f8_mulAdd( float8_t, float8_t, float8_t );
+float8_t f8_div( float8_t, float8_t );
+float8_t f8_rem( float8_t, float8_t );
+float8_t f8_sqrt( float8_t );
+bool f8_eq( float8_t, float8_t );
+bool f8_le( float8_t, float8_t );
+bool f8_lt( float8_t, float8_t );
+bool f8_eq_signaling( float8_t, float8_t );
+bool f8_le_quiet( float8_t, float8_t );
+bool f8_lt_quiet( float8_t, float8_t );
+bool f8_isSignalingNaN( float8_t );
+uint_fast16_t f8_classify( float8_t );
+float8_t f8_rsqrte7( float8_t );
+float8_t f8_recip7( float8_t );
+
+/*----------------------------------------------------------------------------
+| Conversions into the 8-bit format.  Each rounds once, from the exact value.
+*----------------------------------------------------------------------------*/
+float8_t ui32_to_f8( uint32_t );
+float8_t ui64_to_f8( uint64_t );
+float8_t i32_to_f8( int32_t );
+float8_t i64_to_f8( int64_t );
+float8_t f16_to_f8( float16_t );
+float8_t f32_to_f8( float32_t );
+float8_t f64_to_f8( float64_t );
 
 /*----------------------------------------------------------------------------
 | 16-bit (half-precision) floating-point operations.

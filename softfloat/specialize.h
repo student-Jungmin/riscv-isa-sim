@@ -94,6 +94,38 @@ extern "C" {
 struct commonNaN { char _unused; };
 
 /*----------------------------------------------------------------------------
+| Default generated 8-bit NaN.  E4M3 has no infinities and S.1111.111 is its
+| only NaN per sign (hence max 448); E5M2 is IEEE-shaped with a quiet bit.
+*----------------------------------------------------------------------------*/
+#define defaultNaNF8E4M3UI 0x7F
+#define defaultNaNF8E5M2UI 0x7E
+#define defaultNaNF8UI \
+    (softfloat_fp8Format == softfloat_fp8_e4m3 ? defaultNaNF8E4M3UI \
+                                               : defaultNaNF8E5M2UI)
+
+/*----------------------------------------------------------------------------
+| True when `uiA' is an 8-bit signaling NaN.  Only E5M2 can hold one.
+| Note:  This macro evaluates its argument more than once.
+*----------------------------------------------------------------------------*/
+#define softfloat_isSigNaNF8E5M2UI( uiA ) ((((uiA) & 0x7E) == 0x7C) && ((uiA) & 0x01))
+#define softfloat_isSigNaNF8UI( uiA ) \
+    (softfloat_fp8Format == softfloat_fp8_e4m3 ? false \
+                                               : softfloat_isSigNaNF8E5M2UI( uiA ))
+
+/*----------------------------------------------------------------------------
+| Assuming `uiA' has the bit pattern of an 8-bit floating-point NaN, converts
+| this NaN to the common NaN form, and stores the resulting common NaN at the
+| location pointed to by `zPtr'.  E4M3 can never signal, so E4M3 never raises.
+*----------------------------------------------------------------------------*/
+#define softfloat_f8UIToCommonNaN( uiA, zPtr ) if ( softfloat_isSigNaNF8UI( uiA ) ) softfloat_raiseFlags( softfloat_flag_invalid )
+
+/*----------------------------------------------------------------------------
+| Converts the common NaN pointed to by `aPtr' into an 8-bit floating-point
+| NaN, and returns the bit pattern of this value as an unsigned integer.
+*----------------------------------------------------------------------------*/
+#define softfloat_commonNaNToF8UI( aPtr ) ((uint_fast8_t) defaultNaNF8UI)
+
+/*----------------------------------------------------------------------------
 | The bit pattern for a default generated 16-bit floating-point NaN.
 *----------------------------------------------------------------------------*/
 #define defaultNaNF16UI 0x7E00
