@@ -1,0 +1,4 @@
+*.elf
+*.o
+expected.h
+__pycache__/

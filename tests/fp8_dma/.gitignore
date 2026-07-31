@@ -1,0 +1,5 @@
+*.elf
+*.o
+oracle
+dma_access/
+indirect_access/
