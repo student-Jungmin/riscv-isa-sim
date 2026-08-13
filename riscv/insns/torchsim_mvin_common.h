@@ -177,15 +177,27 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                             uint64_t indirect_element_size = desc_indirect_esize;
                             uint64_t indirect_addr = indirect_base_addr + s_idx * indirect_element_size + vlane_idx * P.VU.vu_sram_byte;
                             uint64_t indirect_idx = 0;
+                            // AN INDEX IS SIGNED, AND THE FIELD IT ARRIVES IN IS
+                            // NARROWER THAN AN ADDRESS. Read unsigned, -128 in a
+                            // four-byte field becomes 4294967168 and
+                            // base + idx * scale lands 1 << (32 + log2(scale))
+                            // past the tile -- measured as a User load segfault
+                            // on ms_deform_attn and on masked_negative_offset,
+                            // whose kernel computed idx - 128. At eight bytes the
+                            // zero extension is the identity, so the wrap in
+                            // two's complement saved it and only the narrow
+                            // fields were ever wrong. Sign-extending here is what
+                            // that width was missing; the compiler no longer has
+                            // to widen every index tile to i64 to dodge it.
                             switch(indirect_element_size) {
                             case 1:
-                                indirect_idx = MMU.load_uint8(indirect_addr);
+                                indirect_idx = (int64_t)MMU.load_int8(indirect_addr);
                                 break;
                             case 2:
-                                indirect_idx = MMU.load_uint16(indirect_addr);
+                                indirect_idx = (int64_t)MMU.load_int16(indirect_addr);
                                 break;
                             case 4:
-                                indirect_idx = MMU.load_uint32(indirect_addr);
+                                indirect_idx = (int64_t)MMU.load_int32(indirect_addr);
                                 break;
                             case 8:
                                 indirect_idx = MMU.load_uint64(indirect_addr);
