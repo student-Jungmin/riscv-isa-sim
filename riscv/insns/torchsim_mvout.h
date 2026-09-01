@@ -25,6 +25,7 @@ reg_t desc_dim_size[4], desc_mm_stride[4], desc_spad_stride[4];
 reg_t desc_dim_low[4], desc_dim_high[4];
 reg_t desc_element_size, desc_vlane_stride; int desc_vlane_split_axis; bool desc_indirect;
 reg_t desc_indirect_addr, desc_indirect_stride, desc_indirect_esize; uint64_t desc_fill;
+int desc_indirect_dim; reg_t desc_indirect_lanes;
 const reg_t descp = P.VU.dma_desc_ptr;
 for (int i = 0; i < 4; i++) {
   desc_dim_size[i]   = (int32_t)MMU.load_uint32(descp + 0  + 4*i);
@@ -44,6 +45,8 @@ const bool desc_acc_float  = desc_flags & 0x8;   // accumulate with float (else 
 desc_indirect_addr    = MMU.load_uint64(descp + 120);
 desc_indirect_stride  = MMU.load_uint16(descp + 128);
 desc_indirect_esize   = MMU.load_uint16(descp + 130);
+desc_indirect_dim     = MMU.load_uint8(descp + 132);
+desc_indirect_lanes   = MMU.load_uint16(descp + 134);
 desc_fill             = MMU.load_uint64(descp + 136);
 
 const reg_t *p_dim_size = desc_dim_size;
@@ -170,7 +173,27 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                             uint64_t indirect_base_addr = desc_indirect_addr;
                             uint64_t indirect_stride = desc_indirect_stride;
                             uint64_t indirect_element_size = desc_indirect_esize;
-                            uint64_t indirect_addr = indirect_base_addr + s_idx * indirect_element_size + vlane_idx * P.VU.vu_sram_byte;
+                            // ONE INDEX PER AXIS POSITION, NOT PER ELEMENT. dim k+1
+                            // says the index varies along axis k alone, so it is read
+                            // at that axis's GLOBAL coordinate; 0 keeps the old walk.
+                            uint64_t indirect_addr;
+                            if (desc_indirect_dim) {
+                                const int ia = desc_indirect_dim - 1;
+                                uint64_t i_crd = (ia == N) ? n : (ia == C) ? c : (ia == H) ? h : w;
+                                if (ia == vlane_split_axis)
+                                    i_crd += (outerloop_idx * used_vlane + vlane_idx) * vlane_stride;
+                                // THE INDEX IS ITS OWN RANK-1 TILE: entry p sits in lane
+                                // p % lanes at offset p / lanes, and ONE lane is the
+                                // legal answer too -- so how many lanes hold it is the
+                                // compiler's to say, not this loop's to guess.
+                                uint64_t i_lanes = desc_indirect_lanes ? desc_indirect_lanes : 1;
+                                indirect_addr = indirect_base_addr
+                                              + (i_crd / i_lanes) * indirect_element_size
+                                              + (i_crd % i_lanes) * P.VU.vu_sram_byte;
+                            } else {
+                                indirect_addr = indirect_base_addr + s_idx * indirect_element_size
+                                              + vlane_idx * P.VU.vu_sram_byte;
+                            }
                             uint64_t indirect_idx = 0;
                             // AN INDEX IS SIGNED, AND THE FIELD IT ARRIVES IN IS
                             // NARROWER THAN AN ADDRESS. Read unsigned, -128 in a
