@@ -54,6 +54,11 @@ desc_indirect_lanes   = MMU.load_uint16(descp + 134);
 // siblings' rows alone, and the box is the only thing that says which are its.
 const unsigned desc_skip_axes = (desc_flags >> 4) & 0xF;
 desc_fill             = MMU.load_uint64(descp + 136);
+// THE DRAM RANGE THIS TRANSFER MAY TOUCH, or 0 for "no bound". An address the
+// walk or an indirect index puts outside it is NOT this transfer's to write --
+// which is how a masked-off element is sent nowhere instead of somewhere.
+const reg_t desc_dram_base  = MMU.load_uint64(descp + 144);
+const reg_t desc_dram_bytes = MMU.load_uint64(descp + 152);
 
 const reg_t *p_dim_size = desc_dim_size;
 const reg_t *p_mm_stride = desc_mm_stride;
@@ -251,6 +256,11 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                             indirect_map[d_idx] = indirect_idx;
                             d_addr += indirect_idx * indirect_stride * element_size;
                         }
+
+                        // OUTSIDE THE ARGUMENT: read nothing, fill instead.
+                        if (desc_dram_bytes && (d_addr < desc_dram_base
+                                || d_addr + element_size > desc_dram_base + desc_dram_bytes))
+                            is_used_vlane = false;
 
                         if (element_size == 1) {
                             uint8_t val = is_used_vlane ? MMU.load_uint8(d_addr) : (uint8_t)desc_fill;
