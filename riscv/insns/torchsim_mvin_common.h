@@ -10,6 +10,9 @@
 #define W 3
 
 #define ROUNDUP(X, Y) (((X) + (Y) - 1) / (Y) * (Y))
+// NOT AN ADDRESS, so it cannot collide with one: "a sibling piece owns this
+// position". 0 stays "outside the box" and still means fill.
+#define DMA_SKIP ((uint64_t)-1)
 const char* debug_env = std::getenv("SPIKE_DEBUG");
 const int debug_flag = debug_env ? std::stoi(debug_env) : 0;
 
@@ -46,6 +49,10 @@ desc_indirect_stride  = MMU.load_uint16(descp + 128);
 desc_indirect_esize   = MMU.load_uint16(descp + 130);
 desc_indirect_dim     = MMU.load_uint8(descp + 132);
 desc_indirect_lanes   = MMU.load_uint16(descp + 134);
+// WHICH AXES MEAN "SKIP" OUTSIDE THE BOX rather than "fill" -- one bit per axis.
+// A tile assembled from several transfers needs every piece to leave its
+// siblings' rows alone, and the box is the only thing that says which are its.
+const unsigned desc_skip_axes = (desc_flags >> 4) & 0xF;
 desc_fill             = MMU.load_uint64(descp + 136);
 
 const reg_t *p_dim_size = desc_dim_size;
@@ -137,13 +144,19 @@ for (uint64_t n=0; n<p_dim_size[0]; n++) {
                 uint64_t d_addr = dramAddr + d_offset;
                 uint64_t buffer_idx = n * p_dim_size[1] * p_dim_size[2] * p_dim_size[3] + c * p_dim_size[2] * p_dim_size[3] + h * p_dim_size[3] + w;
                 // masked-DMA tail clamp: positions outside [dim_low, dim_high) are the
-                // lane-align tail (or pad) -> sentinel 0 so the store below fills them.
-                bool in_box = !desc_masked || (
-                    (int64_t)n >= desc_dim_low[0] && (int64_t)n < desc_dim_high[0] &&
-                    (int64_t)c >= desc_dim_low[1] && (int64_t)c < desc_dim_high[1] &&
-                    (int64_t)h >= desc_dim_low[2] && (int64_t)h < desc_dim_high[2] &&
-                    (int64_t)w >= desc_dim_low[3] && (int64_t)w < desc_dim_high[3]);
-                static_cast<uint64_t*>(dma_buffer)[buffer_idx] = in_box ? d_addr : 0;
+                // lane-align tail (or pad) -> sentinel 0 so the store below fills them,
+                // or DMA_SKIP on a skip axis so the store below leaves them alone.
+                const int64_t crd[4] = {(int64_t)n, (int64_t)c, (int64_t)h, (int64_t)w};
+                bool inb[4], in_box = true;
+                for (int i = 0; i < 4; i++) {
+                    inb[i] = crd[i] >= desc_dim_low[i] && crd[i] < desc_dim_high[i];
+                    in_box &= inb[i];
+                }
+                in_box = !desc_masked || in_box;
+                uint64_t oob = 0;
+                for (int i = 0; i < 4; i++)
+                    if ((desc_skip_axes >> i & 1) && !inb[i]) oob = DMA_SKIP;
+                static_cast<uint64_t*>(dma_buffer)[buffer_idx] = in_box ? d_addr : oob;
             }
         }
     }
@@ -162,6 +175,8 @@ for (uint64_t outerloop_idx=0; outerloop_idx<n_outerloop; outerloop_idx++) {
                         bool is_used_vlane = vlane_idx < used_vlane;
                         uint64_t s_addr = scratchpadAddr + s_idx * element_size + vlane_idx * P.VU.vu_sram_byte;
                         uint64_t d_addr = is_used_vlane ? static_cast<uint64_t*>(dma_buffer)[d_idx] : 0;
+                        // A SIBLING PIECE OWNS THIS ROW: not ours to fill.
+                        if (d_addr == DMA_SKIP) { continue; }
                         is_used_vlane &= (d_addr != 0);
 
                         if (scratchpadAddr + s_idx * element_size >= P.VU.sram_v_space.first + P.VU.vu_sram_byte) {
