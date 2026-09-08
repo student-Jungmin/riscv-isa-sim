@@ -16,6 +16,7 @@
 #include "entropy_source.h"
 #include "csrs.h"
 #include "systolic_array.h"
+#include "cross_lane_unit.h"
 
 class processor_t;
 class mmu_t;
@@ -25,6 +26,7 @@ class trap_t;
 class extension_t;
 class disassembler_t;
 class systolicArray_t;
+class crossLaneUnit_t;
 
 struct insn_desc_t
 {
@@ -316,6 +318,7 @@ public:
   extension_t* get_extension();
   extension_t* get_extension(const char* name);
   systolicArray_t* get_systolicArray() { return SA; }
+  crossLaneUnit_t* get_crossLaneUnit() { return XLU; }
   bool any_custom_extensions() const {
     return !custom_extensions.empty();
   }
@@ -637,6 +640,7 @@ public:
 
   vectorUnit_t VU;
   systolicArray_t *SA;
+  crossLaneUnit_t *XLU;
   const char *base_path;
 };
 
