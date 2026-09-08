@@ -1,7 +1,9 @@
-// The transpose itself, and the queues it runs between.
-// `transpose` DRAINS `in` AND FILLS `out`: lane L's row becomes column L, so the
-// value at (lane L, offset k) leaves at (lane k, offset L).
+// The cross-lane operations, and the queues they run between.
+// EVERY OP DRAINS `in` AND FILLS `out`, and what changes between them is only how a
+// value's LANE is rewritten. `run` is the one place that says a tile is complete.
 #include "cross_lane_unit.h"
+
+#include <cfloat>
 
 void crossLaneUnit_t::reset()
 {
@@ -15,19 +17,20 @@ void crossLaneUnit_t::reset()
     out[i] = new std::queue<float>();
 
   depth = 0;
+  op = XLU_TRANSPOSE;
 }
 
-void crossLaneUnit_t::transpose()
+void crossLaneUnit_t::run()
 {
   bool debug_flag = get_env_flag("SPIKE_XLU_DEBUG");
 
   if (depth == 0)
     return;
 
-  // THE WHOLE TILE FIRST, THEN THE SWAP. A lane's row has to be complete before any
-  // column is, which is why this cannot happen a push at a time the way the
-  // systolic array's compute does.
-  std::vector<std::vector<float>> tile(n_lane);
+  // THE WHOLE TILE FIRST, THEN THE OP. A lane's row has to be complete before any
+  // column or any fold is, which is why this cannot happen a push at a time the way
+  // the systolic array's compute does.
+  std::vector<std::vector<float> > tile(n_lane);
   for (uint32_t lane = 0; lane < n_lane; lane++) {
     tile[lane].reserve(depth);
     for (reg_t k = 0; k < depth && !in[lane]->empty(); k++) {
@@ -37,7 +40,7 @@ void crossLaneUnit_t::transpose()
   }
 
   if (debug_flag) {
-    printf("======= TRANSPOSE =======\n");
+    printf("======= XLU op %d =======\n", (int)op);
     printf("-------- Input (%u lanes x %ld deep) --------\n", n_lane, (long)depth);
     for (uint32_t lane = 0; lane < n_lane && lane < 8; lane++) {
       printf("lane[%u] ", lane);
@@ -48,26 +51,35 @@ void crossLaneUnit_t::transpose()
   }
 
   // WHAT A POP DID NOT TAKE IS NOT THIS TILE'S. A push covers every lane but only
-  // the used ones carry data, so a transposed column is `n_lane` long while the pop
+  // the used ones carry data, so an output column is `n_lane` long while the pop
   // that reads it takes one register -- the rest is the unused lanes' padding. Left
-  // in place it comes back as the NEXT tile's first column, which is a wrong answer
+  // in place it comes back as the NEXT tile's first value, which is a wrong answer
   // and not a missing one.
   for (uint32_t k = 0; k < n_lane; k++)
     while (!out[k]->empty())
       out[k]->pop();
 
-  // Column k becomes lane k's row. ONLY `depth` LANES RECEIVE ANYTHING -- the tile
-  // was `n_lane` wide and `depth` deep, so transposed it is `depth` wide, and the
-  // lanes past that keep whatever they held.
-  for (reg_t k = 0; k < depth && k < n_lane; k++)
-    for (uint32_t lane = 0; lane < n_lane; lane++)
-      out[k]->push(k < tile[lane].size() ? tile[lane][k] : 0.0f);
+  switch (op) {
+    case XLU_REDUCE_ADD:
+      reduce(tile, false);
+      break;
+    case XLU_REDUCE_MAX:
+      reduce(tile, true);
+      break;
+    case XLU_BROADCAST:
+      broadcast(tile);
+      break;
+    case XLU_TRANSPOSE:
+    default:
+      transpose(tile);
+      break;
+  }
 
   if (debug_flag) {
-    printf("-------- Output (%ld lanes x %u deep) --------\n", (long)depth, n_lane);
-    for (reg_t k = 0; k < depth && k < 8; k++) {
-      printf("lane[%ld] ", (long)k);
-      std::queue<float> peek = *out[k];
+    printf("-------- Output --------\n");
+    for (uint32_t lane = 0; lane < n_lane && lane < 8; lane++) {
+      printf("lane[%u] ", lane);
+      std::queue<float> peek = *out[lane];
       for (uint32_t i = 0; i < 8 && !peek.empty(); i++) {
         printf("%9f ", peek.front());
         peek.pop();
@@ -78,4 +90,47 @@ void crossLaneUnit_t::transpose()
   }
 
   depth = 0;
+}
+
+// Column k becomes lane k's row. ONLY `depth` LANES RECEIVE ANYTHING -- the tile was
+// `n_lane` wide and `depth` deep, so transposed it is `depth` wide, and the lanes
+// past that keep whatever they held.
+void crossLaneUnit_t::transpose(const std::vector<std::vector<float> > &tile)
+{
+  for (reg_t k = 0; k < depth && k < n_lane; k++)
+    for (uint32_t lane = 0; lane < n_lane; lane++)
+      out[k]->push(k < tile[lane].size() ? tile[lane][k] : 0.0f);
+}
+
+// Fold the LANE axis and leave the depth alone: offset k of every lane becomes the
+// fold of offset k over all lanes. THE RESULT LANDS IN EVERY LANE, because a folded
+// tile is read back by lanes that no longer have an axis to be told apart by.
+// EVERY LANE COUNTS. A lane the compiler is not using must hold the identity, the
+// same contract the systolic array's zero padding already stands on.
+void crossLaneUnit_t::reduce(const std::vector<std::vector<float> > &tile,
+                             bool want_max)
+{
+  for (reg_t k = 0; k < depth; k++) {
+    float acc = want_max ? -FLT_MAX : 0.0f;
+    for (uint32_t lane = 0; lane < n_lane; lane++) {
+      if (k >= tile[lane].size())
+        continue;
+      float v = tile[lane][k];
+      acc = want_max ? (v > acc ? v : acc) : acc + v;
+    }
+    for (uint32_t lane = 0; lane < n_lane; lane++)
+      out[lane]->push(acc);
+  }
+}
+
+// Lane 0's row to every lane. THE SOURCE IS LANE 0 BY CONVENTION and not by
+// election: a value with no lane axis is the one a single bank holds, and a DMA
+// that staged one element staged it there.
+void crossLaneUnit_t::broadcast(const std::vector<std::vector<float> > &tile)
+{
+  for (reg_t k = 0; k < depth; k++) {
+    float v = k < tile[0].size() ? tile[0][k] : 0.0f;
+    for (uint32_t lane = 0; lane < n_lane; lane++)
+      out[lane]->push(v);
+  }
 }

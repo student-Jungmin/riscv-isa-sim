@@ -1,6 +1,6 @@
-// The transpose unit: rows go in a vector register at a time, columns come back.
-// ONE QUEUE PER LANE, like systolicArray_t -- a push IS the serialisation, and the
-// transpose is the only thing that happens between the two queues.
+// The cross-lane unit: a tile goes in a vector register at a time and comes back
+// with the LANE AXIS rewritten -- transposed, folded, or replicated. ONE QUEUE PER
+// LANE, like systolicArray_t; the push IS the serialisation and the op runs between.
 #ifndef _RISCV_CROSS_LANE_UNIT_H
 #define _RISCV_CROSS_LANE_UNIT_H
 
@@ -9,6 +9,16 @@
 #include <vector>
 
 class processor_t;
+
+// WHAT THE PENDING TILE IS FOR. The push names it, the pop runs it: a fold is not
+// known until every lane is in, which is the same reason the transpose waits.
+// The numbering is the ISA's SIMM5 within each machine's funct7 family.
+enum xlu_op_t {
+  XLU_TRANSPOSE  = 0,
+  XLU_REDUCE_ADD = 0x10,
+  XLU_REDUCE_MAX = 0x11,
+  XLU_BROADCAST  = 0x12,
+};
 
 class crossLaneUnit_t
 {
@@ -23,16 +33,23 @@ public:
   // last transpose. IT IS THE TILE'S OTHER DIMENSION, so the transpose reads it
   // rather than assuming the tile is square.
   reg_t depth;
+  // The op the pending tile was pushed for. A push sets it; two pushes with
+  // different ops between one pop is the compiler's error, not a mode to model.
+  xlu_op_t op;
 
 public:
   void reset();
-  void transpose();
+  void run();
+  void transpose(const std::vector<std::vector<float> > &tile);
+  void reduce(const std::vector<std::vector<float> > &tile, bool want_max);
+  void broadcast(const std::vector<std::vector<float> > &tile);
 
   crossLaneUnit_t(processor_t *p, reg_t n_vu) : p(p),
                                                 n_lane(n_vu),
                                                 in(0),
                                                 out(0),
-                                                depth(0)
+                                                depth(0),
+                                                op(XLU_TRANSPOSE)
   {
   }
 
@@ -60,6 +77,11 @@ public:
   void push(uint32_t lane, float val)
   {
     in[lane]->push(val);
+  }
+
+  void set_op(xlu_op_t o)
+  {
+    op = o;
   }
 
   float pop(uint32_t lane)
