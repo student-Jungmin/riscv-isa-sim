@@ -1,5 +1,5 @@
 // The cross-lane unit: a tile goes in a vector register at a time and comes back
-// with the LANE AXIS rewritten -- transposed, folded, or replicated. ONE QUEUE PER
+// with the LANE AXIS rewritten -- transposed, reduced, or replicated. ONE QUEUE PER
 // LANE, like systolicArray_t; the push IS the serialisation and the op runs between.
 #ifndef _RISCV_CROSS_LANE_UNIT_H
 #define _RISCV_CROSS_LANE_UNIT_H
@@ -10,7 +10,7 @@
 
 class processor_t;
 
-// WHAT THE PENDING TILE IS FOR. The push names it, the pop runs it: a fold is not
+// WHAT THE PENDING TILE IS FOR. The push names it, the pop runs it: a reduce is not
 // known until every lane is in, which is the same reason the transpose waits.
 // The numbering is the ISA's SIMM5 within each machine's funct7 family.
 enum xlu_op_t {
@@ -18,6 +18,8 @@ enum xlu_op_t {
   XLU_REDUCE_ADD = 0x10,
   XLU_REDUCE_MAX = 0x11,
   XLU_BROADCAST  = 0x12,
+  XLU_PERMUTE    = 0x13,
+  XLU_REDUCE_MIN = 0x14,
 };
 
 class crossLaneUnit_t
@@ -41,8 +43,9 @@ public:
   void reset();
   void run();
   void transpose(const std::vector<std::vector<float> > &tile);
-  void reduce(const std::vector<std::vector<float> > &tile, bool want_max);
+  void reduce(const std::vector<std::vector<float> > &tile, xlu_op_t kind);
   void broadcast(const std::vector<std::vector<float> > &tile);
+  void permute(const std::vector<std::vector<float> > &tile);
 
   crossLaneUnit_t(processor_t *p, reg_t n_vu) : p(p),
                                                 n_lane(n_vu),

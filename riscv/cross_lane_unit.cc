@@ -28,7 +28,7 @@ void crossLaneUnit_t::run()
     return;
 
   // THE WHOLE TILE FIRST, THEN THE OP. A lane's row has to be complete before any
-  // column or any fold is, which is why this cannot happen a push at a time the way
+  // column or any reduction is, which is why this cannot happen a push at a time the
   // the systolic array's compute does.
   std::vector<std::vector<float> > tile(n_lane);
   for (uint32_t lane = 0; lane < n_lane; lane++) {
@@ -61,13 +61,15 @@ void crossLaneUnit_t::run()
 
   switch (op) {
     case XLU_REDUCE_ADD:
-      reduce(tile, false);
-      break;
     case XLU_REDUCE_MAX:
-      reduce(tile, true);
+    case XLU_REDUCE_MIN:
+      reduce(tile, op);
       break;
     case XLU_BROADCAST:
       broadcast(tile);
+      break;
+    case XLU_PERMUTE:
+      permute(tile);
       break;
     case XLU_TRANSPOSE:
     default:
@@ -102,21 +104,23 @@ void crossLaneUnit_t::transpose(const std::vector<std::vector<float> > &tile)
       out[k]->push(k < tile[lane].size() ? tile[lane][k] : 0.0f);
 }
 
-// Fold the LANE axis and leave the depth alone: offset k of every lane becomes the
-// fold of offset k over all lanes. THE RESULT LANDS IN EVERY LANE, because a folded
-// tile is read back by lanes that no longer have an axis to be told apart by.
+// Reduce ACROSS THE LANES and leave the depth alone: offset k of every lane becomes
+// the reduction of offset k over all lanes. THE RESULT LANDS IN EVERY LANE, because a
+// reduced tile is read back by lanes that no longer have an axis to tell them apart.
 // EVERY LANE COUNTS. A lane the compiler is not using must hold the identity, the
 // same contract the systolic array's zero padding already stands on.
 void crossLaneUnit_t::reduce(const std::vector<std::vector<float> > &tile,
-                             bool want_max)
+                             xlu_op_t kind)
 {
   for (reg_t k = 0; k < depth; k++) {
-    float acc = want_max ? -FLT_MAX : 0.0f;
+    float acc = kind == XLU_REDUCE_MAX ? -FLT_MAX
+              : kind == XLU_REDUCE_MIN ?  FLT_MAX : 0.0f;
     for (uint32_t lane = 0; lane < n_lane; lane++) {
       if (k >= tile[lane].size())
         continue;
       float v = tile[lane][k];
-      acc = want_max ? (v > acc ? v : acc) : acc + v;
+      acc = kind == XLU_REDUCE_MAX ? (v > acc ? v : acc)
+          : kind == XLU_REDUCE_MIN ? (v < acc ? v : acc) : acc + v;
     }
     for (uint32_t lane = 0; lane < n_lane; lane++)
       out[lane]->push(acc);
@@ -126,6 +130,20 @@ void crossLaneUnit_t::reduce(const std::vector<std::vector<float> > &tile,
 // Lane 0's row to every lane. THE SOURCE IS LANE 0 BY CONVENTION and not by
 // election: a value with no lane axis is the one a single bank holds, and a DMA
 // that staged one element staged it there.
+// ROW 0 IS THE PATTERN AND NOT DATA: one lane number per lane, saying where that
+// lane READS FROM. The tile follows it through the same queue, because an sf.vc form
+// carries one vector operand and there is no second one to describe a mapping with.
+void crossLaneUnit_t::permute(const std::vector<std::vector<float> > &tile)
+{
+  for (uint32_t lane = 0; lane < n_lane; lane++) {
+    uint32_t from = tile[lane].empty() ? lane : (uint32_t)tile[lane][0];
+    for (reg_t k = 1; k < depth; k++) {
+      bool have = from < n_lane && k < tile[from].size();
+      out[lane]->push(have ? tile[from][k] : 0.0f);
+    }
+  }
+}
+
 void crossLaneUnit_t::broadcast(const std::vector<std::vector<float> > &tile)
 {
   for (reg_t k = 0; k < depth; k++) {
