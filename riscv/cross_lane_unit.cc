@@ -3,8 +3,6 @@
 // value's LANE is rewritten. `run` is the one place that says a tile is complete.
 #include "cross_lane_unit.h"
 
-#include <cfloat>
-
 void crossLaneUnit_t::reset()
 {
   free_queues();
@@ -60,11 +58,6 @@ void crossLaneUnit_t::run()
       out[k]->pop();
 
   switch (op) {
-    case XLU_REDUCE_ADD:
-    case XLU_REDUCE_MAX:
-    case XLU_REDUCE_MIN:
-      reduce(tile, op);
-      break;
     case XLU_BROADCAST:
       broadcast(tile);
       break;
@@ -102,29 +95,6 @@ void crossLaneUnit_t::transpose(const std::vector<std::vector<float> > &tile)
   for (reg_t k = 0; k < depth && k < n_lane; k++)
     for (uint32_t lane = 0; lane < n_lane; lane++)
       out[k]->push(k < tile[lane].size() ? tile[lane][k] : 0.0f);
-}
-
-// Reduce ACROSS THE LANES and leave the depth alone: offset k of every lane becomes
-// the reduction of offset k over all lanes. THE RESULT LANDS IN EVERY LANE, because a
-// reduced tile is read back by lanes that no longer have an axis to tell them apart.
-// EVERY LANE COUNTS. A lane the compiler is not using must hold the identity, the
-// same contract the systolic array's zero padding already stands on.
-void crossLaneUnit_t::reduce(const std::vector<std::vector<float> > &tile,
-                             xlu_op_t kind)
-{
-  for (reg_t k = 0; k < depth; k++) {
-    float acc = kind == XLU_REDUCE_MAX ? -FLT_MAX
-              : kind == XLU_REDUCE_MIN ?  FLT_MAX : 0.0f;
-    for (uint32_t lane = 0; lane < n_lane; lane++) {
-      if (k >= tile[lane].size())
-        continue;
-      float v = tile[lane][k];
-      acc = kind == XLU_REDUCE_MAX ? (v > acc ? v : acc)
-          : kind == XLU_REDUCE_MIN ? (v < acc ? v : acc) : acc + v;
-    }
-    for (uint32_t lane = 0; lane < n_lane; lane++)
-      out[lane]->push(acc);
-  }
 }
 
 // Lane 0's row to every lane. THE SOURCE IS LANE 0 BY CONVENTION and not by

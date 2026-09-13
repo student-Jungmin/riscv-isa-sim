@@ -141,12 +141,6 @@ riscv_insn_ext_i = \
 	torchsim_vlane_idx \
 	torchsim_t_vpush \
 	torchsim_t_vpop \
-	torchsim_x_vpush_add \
-	torchsim_x_vpop_add \
-	torchsim_x_vpush_max \
-	torchsim_x_vpop_max \
-	torchsim_x_vpush_min \
-	torchsim_x_vpop_min \
 	torchsim_x_vpush_permute \
 	torchsim_x_vpop_permute \
 	torchsim_x_vpush_bcast \
