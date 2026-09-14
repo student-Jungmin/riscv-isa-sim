@@ -18,19 +18,19 @@ static void check(bool ok, const char *what)
 
 // Push `tile[lane][k]` a column at a time, the way an instruction stream does: one
 // push carries one value per lane, and `depth` counts the columns.
-static void push_tile(crossLaneUnit_t &u, const std::vector<std::vector<float> > &tile)
+static void push_tile(crossLaneUnit_t &u, const std::vector<std::vector<uint32_t> > &tile)
 {
   size_t depth = tile[0].size();
   for (size_t k = 0; k < depth; k++) {
     for (uint32_t lane = 0; lane < u.get_n_lane(); lane++)
-      u.push(lane, lane < tile.size() ? tile[lane][k] : 0.0f);
+      u.push(lane, lane < tile.size() ? tile[lane][k] : 0u);
     u.depth += 1;
   }
 }
 
-static std::vector<std::vector<float> > drain(crossLaneUnit_t &u, size_t per_lane)
+static std::vector<std::vector<uint32_t> > drain(crossLaneUnit_t &u, size_t per_lane)
 {
-  std::vector<std::vector<float> > out(u.get_n_lane());
+  std::vector<std::vector<uint32_t> > out(u.get_n_lane());
   for (uint32_t lane = 0; lane < u.get_n_lane(); lane++)
     for (size_t i = 0; i < per_lane && !u.out_empty(lane); i++)
       out[lane].push_back(u.pop(lane));
@@ -47,9 +47,9 @@ static void test_transpose()
   u.set_op(XLU_TRANSPOSE);
   push_tile(u, {{1, 2}, {3, 4}, {5, 6}, {7, 8}});
   u.run();
-  std::vector<std::vector<float> > got = drain(u, 4);
-  check(got[0] == std::vector<float>({1, 3, 5, 7}), "transpose: lane 0 takes column 0");
-  check(got[1] == std::vector<float>({2, 4, 6, 8}), "transpose: lane 1 takes column 1");
+  std::vector<std::vector<uint32_t> > got = drain(u, 4);
+  check(got[0] == std::vector<uint32_t>({1, 3, 5, 7}), "transpose: lane 0 takes column 0");
+  check(got[1] == std::vector<uint32_t>({2, 4, 6, 8}), "transpose: lane 1 takes column 1");
   check(got[2].empty(), "transpose: a lane past the depth is given nothing");
 }
 
@@ -63,9 +63,9 @@ static void test_broadcast()
   u.set_op(XLU_BROADCAST);
   push_tile(u, {{9, 8}, {0, 0}, {0, 0}, {0, 0}});
   u.run();
-  std::vector<std::vector<float> > got = drain(u, 2);
+  std::vector<std::vector<uint32_t> > got = drain(u, 2);
   for (uint32_t lane = 0; lane < 4; lane++)
-    check(got[lane] == std::vector<float>({9, 8}), "broadcast: every lane gets lane 0's row");
+    check(got[lane] == std::vector<uint32_t>({9, 8}), "broadcast: every lane gets lane 0's row");
 }
 
 // ROW 0 IS THE PATTERN AND NOT DATA -- one lane number per lane, saying where that lane
@@ -82,11 +82,11 @@ static void test_permute()
                 {0,      30},
                 {9,      40}});      // 9 is past the end: that lane reads nothing
   u.run();
-  std::vector<std::vector<float> > got = drain(u, 1);
-  check(got[0] == std::vector<float>({30}), "permute: lane 0 reads lane 2");
-  check(got[1] == std::vector<float>({40}), "permute: lane 1 reads lane 3");
-  check(got[2] == std::vector<float>({10}), "permute: lane 2 reads lane 0");
-  check(got[3] == std::vector<float>({0}),  "permute: a source past the end gives zero");
+  std::vector<std::vector<uint32_t> > got = drain(u, 1);
+  check(got[0] == std::vector<uint32_t>({30}), "permute: lane 0 reads lane 2");
+  check(got[1] == std::vector<uint32_t>({40}), "permute: lane 1 reads lane 3");
+  check(got[2] == std::vector<uint32_t>({10}), "permute: lane 2 reads lane 0");
+  check(got[3] == std::vector<uint32_t>({0}),  "permute: a source past the end gives zero");
 }
 
 // WHAT A POP DID NOT TAKE IS NOT THE NEXT TILE'S. A push covers every lane but only the
@@ -104,8 +104,8 @@ static void test_no_residue_between_tiles()
   u.set_op(XLU_TRANSPOSE);
   push_tile(u, {{100, 0}, {200, 0}, {300, 0}, {400, 0}});
   u.run();
-  std::vector<std::vector<float> > got = drain(u, 4);
-  check(got[0] == std::vector<float>({100, 200, 300, 400}),
+  std::vector<std::vector<uint32_t> > got = drain(u, 4);
+  check(got[0] == std::vector<uint32_t>({100, 200, 300, 400}),
         "run: the output queue is emptied before the next tile");
 }
 
@@ -118,34 +118,27 @@ static void test_depth_is_counted_not_assumed()
   u.set_op(XLU_TRANSPOSE);
   push_tile(u, {{1}, {2}, {3}, {4}});
   u.run();
-  std::vector<std::vector<float> > got = drain(u, 4);
-  check(got[0] == std::vector<float>({1, 2, 3, 4}), "transpose: a depth-1 tile lands in lane 0");
+  std::vector<std::vector<uint32_t> > got = drain(u, 4);
+  check(got[0] == std::vector<uint32_t>({1, 2, 3, 4}), "transpose: a depth-1 tile lands in lane 0");
   check(got[1].empty(), "transpose: and nowhere else");
 }
 
-// EVERY BIT PATTERN CROSSES UNCHANGED. The queues hold `float` and a push at e32
-// REINTERPRETS the lane, so the unit must not be reading what the bits mean -- an
-// integer, a NaN and a denormal all have to come back as themselves.
+// EVERY BIT PATTERN CROSSES UNCHANGED. The queues carry 32 RAW BITS and nothing in
+// the unit reads what they mean, so a signalling NaN, a denormal and a set sign bit
+// are all just words -- which is the property that lets an integer tile cross at all.
 static void test_bits_survive()
 {
   crossLaneUnit_t u(0, 4);
   u.reset();
   u.set_op(XLU_TRANSPOSE);
   const uint32_t bits[4] = {0xFFFFFFFFu, 0x7F800001u, 0x00000001u, 0x80000000u};
-  std::vector<std::vector<float> > tile(4);
-  for (int i = 0; i < 4; i++) {
-    float f;
-    memcpy(&f, &bits[i], sizeof f);
-    tile[i].push_back(f);
-  }
+  std::vector<std::vector<uint32_t> > tile(4);
+  for (int i = 0; i < 4; i++)
+    tile[i].push_back(bits[i]);
   push_tile(u, tile);
   u.run();
-  for (int i = 0; i < 4; i++) {
-    float f = u.pop(0);
-    uint32_t back;
-    memcpy(&back, &f, sizeof back);
-    check(back == bits[i], "transpose: the bits come back as themselves");
-  }
+  for (int i = 0; i < 4; i++)
+    check(u.pop(0) == bits[i], "transpose: the bits come back as themselves");
 }
 
 int main()

@@ -7,12 +7,12 @@ void crossLaneUnit_t::reset()
 {
   free_queues();
 
-  in = new std::queue<float>*[n_lane];
-  out = new std::queue<float>*[n_lane];
+  in = new std::queue<uint32_t>*[n_lane];
+  out = new std::queue<uint32_t>*[n_lane];
   for (uint32_t i = 0; i < n_lane; i++)
-    in[i] = new std::queue<float>();
+    in[i] = new std::queue<uint32_t>();
   for (uint32_t i = 0; i < n_lane; i++)
-    out[i] = new std::queue<float>();
+    out[i] = new std::queue<uint32_t>();
 
   depth = 0;
   op = XLU_TRANSPOSE;
@@ -28,7 +28,7 @@ void crossLaneUnit_t::run()
   // THE WHOLE TILE FIRST, THEN THE OP. A lane's row has to be complete before any
   // column or any reduction is, which is why this cannot happen a push at a time the
   // the systolic array's compute does.
-  std::vector<std::vector<float> > tile(n_lane);
+  std::vector<std::vector<uint32_t> > tile(n_lane);
   for (uint32_t lane = 0; lane < n_lane; lane++) {
     tile[lane].reserve(depth);
     for (reg_t k = 0; k < depth && !in[lane]->empty(); k++) {
@@ -43,7 +43,7 @@ void crossLaneUnit_t::run()
     for (uint32_t lane = 0; lane < n_lane && lane < 8; lane++) {
       printf("lane[%u] ", lane);
       for (size_t k = 0; k < tile[lane].size() && k < 8; k++)
-        printf("%9f ", tile[lane][k]);
+        printf("0x%08x ", tile[lane][k]);
       printf("\n");
     }
   }
@@ -74,9 +74,9 @@ void crossLaneUnit_t::run()
     printf("-------- Output --------\n");
     for (uint32_t lane = 0; lane < n_lane && lane < 8; lane++) {
       printf("lane[%u] ", lane);
-      std::queue<float> peek = *out[lane];
+      std::queue<uint32_t> peek = *out[lane];
       for (uint32_t i = 0; i < 8 && !peek.empty(); i++) {
-        printf("%9f ", peek.front());
+        printf("0x%08x ", peek.front());
         peek.pop();
       }
       printf("\n");
@@ -90,34 +90,36 @@ void crossLaneUnit_t::run()
 // Column k becomes lane k's row. ONLY `depth` LANES RECEIVE ANYTHING -- the tile was
 // `n_lane` wide and `depth` deep, so transposed it is `depth` wide, and the lanes
 // past that keep whatever they held.
-void crossLaneUnit_t::transpose(const std::vector<std::vector<float> > &tile)
+void crossLaneUnit_t::transpose(const std::vector<std::vector<uint32_t> > &tile)
 {
   for (reg_t k = 0; k < depth && k < n_lane; k++)
     for (uint32_t lane = 0; lane < n_lane; lane++)
-      out[k]->push(k < tile[lane].size() ? tile[lane][k] : 0.0f);
+      out[k]->push(k < tile[lane].size() ? tile[lane][k] : 0u);
 }
 
 // Lane 0's row to every lane. THE SOURCE IS LANE 0 BY CONVENTION and not by
 // election: a value with no lane axis is the one a single bank holds, and a DMA
 // that staged one element staged it there.
 // ROW 0 IS THE PATTERN AND NOT DATA: one lane number per lane, saying where that
-// lane READS FROM. The tile follows it through the same queue, because an sf.vc form
-// carries one vector operand and there is no second one to describe a mapping with.
-void crossLaneUnit_t::permute(const std::vector<std::vector<float> > &tile)
+// lane READS FROM, AS A PLAIN INTEGER -- the queue carries raw bits, so the compiler
+// pushes the number and not a float spelling of it. The tile follows it through the
+// same queue, because an sf.vc form carries one vector operand and there is no second
+// one to describe a mapping with.
+void crossLaneUnit_t::permute(const std::vector<std::vector<uint32_t> > &tile)
 {
   for (uint32_t lane = 0; lane < n_lane; lane++) {
-    uint32_t from = tile[lane].empty() ? lane : (uint32_t)tile[lane][0];
+    uint32_t from = tile[lane].empty() ? lane : tile[lane][0];
     for (reg_t k = 1; k < depth; k++) {
       bool have = from < n_lane && k < tile[from].size();
-      out[lane]->push(have ? tile[from][k] : 0.0f);
+      out[lane]->push(have ? tile[from][k] : 0u);
     }
   }
 }
 
-void crossLaneUnit_t::broadcast(const std::vector<std::vector<float> > &tile)
+void crossLaneUnit_t::broadcast(const std::vector<std::vector<uint32_t> > &tile)
 {
   for (reg_t k = 0; k < depth; k++) {
-    float v = k < tile[0].size() ? tile[0][k] : 0.0f;
+    uint32_t v = k < tile[0].size() ? tile[0][k] : 0u;
     for (uint32_t lane = 0; lane < n_lane; lane++)
       out[lane]->push(v);
   }

@@ -29,24 +29,24 @@ for (reg_t vu_idx = 0; vu_idx < n_vu; vu_idx++) {
 
         VI_STRIP(i);
         P.VU.vstart->write(i);
-        float val = P.XLU->pop(vu_idx);
+        //: THE BITS BACK AS THEY WENT. What a narrower element rode in the low
+        //: bits of is what it comes out of; nothing here converts, because nothing
+        //: between the push and this read what the bits meant.
+        uint32_t val = P.XLU->pop(vu_idx);
         switch (P.VU.vsew) {
           case e8:
-            P.VU.elt<int8_t>(vd, vreg_inx, vu_idx, true) = static_cast<int8_t>(val);
+            P.VU.elt<uint8_t>(vd, vreg_inx, vu_idx, true) = (uint8_t)val;
             break;
-          case e16: {
-            float32_t fp32;
-            memcpy(&fp32.v, &val, sizeof(float));
-            P.VU.elt<float16_t>(vd, vreg_inx, vu_idx, true) = f32_to_f16(fp32);
+          case e16:
+            P.VU.elt<uint16_t>(vd, vreg_inx, vu_idx, true) = (uint16_t)val;
             break;
-          }
           case e32:
           default:
-            P.VU.elt<float>(vd, vreg_inx, vu_idx, true) = val;
+            P.VU.elt<uint32_t>(vd, vreg_inx, vu_idx, true) = val;
             break;
         }
         if (debug_flag && vu_idx < 8) {
-            printf("%f ", val);
+            printf("0x%08x ", val);
         }
     }
     if (debug_flag && vu_idx < 8) {

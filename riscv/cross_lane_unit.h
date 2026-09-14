@@ -1,7 +1,9 @@
 // The cross-lane unit: a tile goes in a vector register at a time and comes back
 // with the LANE AXIS rewritten -- transposed, replicated or permuted. IT DOES NO
 // ARITHMETIC: a reduction is a transpose and then the VECTOR UNIT's own fold, which
-// is the half that knows the type. ONE QUEUE PER
+// is the half that knows the type. SO THE QUEUES CARRY 32 RAW BITS and nothing here
+// reads what they mean -- an integer, a float, a NaN and a lane number all cross as
+// the bits they are. ONE QUEUE PER
 // LANE, like systolicArray_t; the push IS the serialisation and the op runs between.
 #ifndef _RISCV_CROSS_LANE_UNIT_H
 #define _RISCV_CROSS_LANE_UNIT_H
@@ -32,8 +34,8 @@ public:
   uint32_t n_lane;
   // The tile on the way in and the tile on the way out. `in[L]` is lane L's row as
   // it was pushed; `out[L]` is lane L's column once `transpose` has run.
-  std::queue<float> **in;
-  std::queue<float> **out;
+  std::queue<uint32_t> **in;
+  std::queue<uint32_t> **out;
   // How deep each lane's row is -- the number of values pushed per lane since the
   // last transpose. IT IS THE TILE'S OTHER DIMENSION, so the transpose reads it
   // rather than assuming the tile is square.
@@ -45,9 +47,9 @@ public:
 public:
   void reset();
   void run();
-  void transpose(const std::vector<std::vector<float> > &tile);
-  void broadcast(const std::vector<std::vector<float> > &tile);
-  void permute(const std::vector<std::vector<float> > &tile);
+  void transpose(const std::vector<std::vector<uint32_t> > &tile);
+  void broadcast(const std::vector<std::vector<uint32_t> > &tile);
+  void permute(const std::vector<std::vector<uint32_t> > &tile);
 
   crossLaneUnit_t(processor_t *p, reg_t n_vu) : p(p),
                                                 n_lane(n_vu),
@@ -79,7 +81,7 @@ public:
     }
   }
 
-  void push(uint32_t lane, float val)
+  void push(uint32_t lane, uint32_t val)
   {
     in[lane]->push(val);
   }
@@ -89,9 +91,9 @@ public:
     op = o;
   }
 
-  float pop(uint32_t lane)
+  uint32_t pop(uint32_t lane)
   {
-    float val = out[lane]->front();
+    uint32_t val = out[lane]->front();
     out[lane]->pop();
     return val;
   }

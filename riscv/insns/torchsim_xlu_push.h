@@ -21,27 +21,27 @@ for (reg_t vu_idx = 0; vu_idx < n_vu; vu_idx++) {
     for (reg_t i = 0; i < vl; ++i) {
         VI_STRIP(i);
         P.VU.vstart->write(i);
-        float val;
+        //: THE BITS AS THEY ARE, whatever the SEW says they mean. This unit does
+        //: no arithmetic, so there is nothing to convert FOR -- a narrower element
+        //: rides the low bits of a word and comes back out of them.
+        uint32_t val;
         switch (P.VU.vsew) {
           case e8:
-            val = static_cast<float>(P.VU.elt<int8_t>(vs, vreg_inx, vu_idx));
+            val = P.VU.elt<uint8_t>(vs, vreg_inx, vu_idx);
             break;
-          case e16: {
-            float16_t fp16 = P.VU.elt<float16_t>(vs, vreg_inx, vu_idx);
-            float32_t fp32 = f16_to_f32(fp16);
-            memcpy(&val, &fp32.v, sizeof(float));
+          case e16:
+            val = P.VU.elt<uint16_t>(vs, vreg_inx, vu_idx);
             break;
-          }
           case e32:
-            val = P.VU.elt<float>(vs, vreg_inx, vu_idx);
+            val = P.VU.elt<uint32_t>(vs, vreg_inx, vu_idx);
             break;
           default:
-            val = 0.0f;
+            val = 0;
             break;
         }
         P.XLU->push(vu_idx, val);
         if (debug_flag && vu_idx < 8) {
-            printf("%f ", val);
+            printf("0x%08x ", val);
         }
     }
     if (debug_flag && vu_idx < 8) {
