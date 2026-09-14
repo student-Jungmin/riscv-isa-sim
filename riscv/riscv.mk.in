@@ -17,6 +17,7 @@ riscv_hdrs = \
 	mmu.h \
 	processor.h \
 	systolic_array.h \
+	cross_lane_unit.h \
 	sim.h \
 	simif.h \
 	trap.h \
@@ -42,6 +43,7 @@ riscv_precompiled_hdrs = \
 riscv_srcs = \
 	processor.cc \
 	systolic_array.cc \
+	cross_lane_unit.cc \
 	execute.cc \
 	dts.cc \
 	sim.cc \
@@ -137,6 +139,12 @@ riscv_insn_ext_i = \
 	torchsim_vsin \
 	torchsim_vcos \
 	torchsim_vlane_idx \
+	torchsim_x_vpush_xpose \
+	torchsim_x_vpop_xpose \
+	torchsim_x_vpush_permute \
+	torchsim_x_vpop_permute \
+	torchsim_x_vpush_bcast \
+	torchsim_x_vpop_bcast \
 
 riscv_insn_ext_a = \
 	amoadd_d \

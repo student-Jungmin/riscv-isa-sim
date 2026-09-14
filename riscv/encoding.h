@@ -2832,6 +2832,31 @@
 #define MATCH_TORCHSIM_VLANE_IDX 0x0000305B
 #define MASK_TORCHSIM_VLANE_IDX 0xFE00707F
 
+// The transpose unit. THE SF.VC FORM PICKS THE ENCODING, not a family: bit 29 says
+// the instruction takes a vector operand and bit 25 says it writes none, so a push
+// and a pop CANNOT share a VFUNCT6 -- the push must sit among the .iv forms
+// (funct7 0x15, beside i_vpush 0x11 and w_vpush 0x13) and the pop among the .v.i
+// forms (funct7 0x06, beside vpop 0x04). lower_to_vcix emits these through the
+// upstream sf.vc intrinsics, and an encoding off those forms is one it cannot ask for.
+// SIMM5 IS IN THE MASK, and that is the point of the rule: a family number is one
+// of only FOUR per form, so a different MACHINE gets a family and a different
+// OPERATION OF THE SAME MACHINE gets a SIMM5 (32 per family). Leaving SIMM5 out
+// would let this one instruction swallow all 32, and the second operation of the
+// transpose unit could then only be added by breaking this encoding.
+// `vlog`/`vsin`/`vcos`/`vatan` already share 0x14 this way.
+#define MATCH_TORCHSIM_X_VPUSH_XPOSE 0x2E00305B
+#define MASK_TORCHSIM_X_VPUSH_XPOSE 0xFE0FF07F
+#define MATCH_TORCHSIM_X_VPOP_XPOSE 0x0400305B
+#define MASK_TORCHSIM_X_VPOP_XPOSE 0xFE0FF07F
+#define MATCH_TORCHSIM_X_VPUSH_PERMUTE 0x2E01B05B
+#define MASK_TORCHSIM_X_VPUSH_PERMUTE 0xFE0FF07F
+#define MATCH_TORCHSIM_X_VPOP_PERMUTE 0x0401B05B
+#define MASK_TORCHSIM_X_VPOP_PERMUTE 0xFE0FF07F
+#define MATCH_TORCHSIM_X_VPUSH_BCAST 0x2E01305B
+#define MASK_TORCHSIM_X_VPUSH_BCAST 0xFE0FF07F
+#define MATCH_TORCHSIM_X_VPOP_BCAST 0x0401305B
+#define MASK_TORCHSIM_X_VPOP_BCAST 0xFE0FF07F
+
 #define CSR_FFLAGS 0x1
 #define CSR_FRM 0x2
 #define CSR_FCSR 0x3
@@ -3596,6 +3621,12 @@ DECLARE_INSN(torchsim_vatan, MATCH_TORCHSIM_VATAN, MASK_TORCHSIM_VATAN)
 DECLARE_INSN(torchsim_vsin, MATCH_TORCHSIM_VSIN, MASK_TORCHSIM_VSIN)
 DECLARE_INSN(torchsim_vcos, MATCH_TORCHSIM_VCOS, MASK_TORCHSIM_VCOS)
 DECLARE_INSN(torchsim_vlane_idx, MATCH_TORCHSIM_VLANE_IDX, MASK_TORCHSIM_VLANE_IDX)
+DECLARE_INSN(torchsim_x_vpush_xpose, MATCH_TORCHSIM_X_VPUSH_XPOSE, MASK_TORCHSIM_X_VPUSH_XPOSE)
+DECLARE_INSN(torchsim_x_vpop_xpose, MATCH_TORCHSIM_X_VPOP_XPOSE, MASK_TORCHSIM_X_VPOP_XPOSE)
+DECLARE_INSN(torchsim_x_vpush_permute, MATCH_TORCHSIM_X_VPUSH_PERMUTE, MASK_TORCHSIM_X_VPUSH_PERMUTE)
+DECLARE_INSN(torchsim_x_vpop_permute, MATCH_TORCHSIM_X_VPOP_PERMUTE, MASK_TORCHSIM_X_VPOP_PERMUTE)
+DECLARE_INSN(torchsim_x_vpush_bcast, MATCH_TORCHSIM_X_VPUSH_BCAST, MASK_TORCHSIM_X_VPUSH_BCAST)
+DECLARE_INSN(torchsim_x_vpop_bcast, MATCH_TORCHSIM_X_VPOP_BCAST, MASK_TORCHSIM_X_VPOP_BCAST)
 DECLARE_INSN(custom1_rd, MATCH_CUSTOM1_RD, MASK_CUSTOM1_RD)
 DECLARE_INSN(custom1_rd_rs1, MATCH_CUSTOM1_RD_RS1, MASK_CUSTOM1_RD_RS1)
 DECLARE_INSN(custom1_rd_rs1_rs2, MATCH_CUSTOM1_RD_RS1_RS2, MASK_CUSTOM1_RD_RS1_RS2)
