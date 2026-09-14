@@ -1,0 +1,12 @@
+#!/bin/bash
+# The cross-lane unit's own checks. NO RISC-V TOOLCHAIN AND NO SIMULATOR RUN: the
+# operations read the queues, `n_lane` and `depth` and nothing else, so the unit is
+# built here with a null processor and asked directly what it does.
+set -e
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+SRC="$DIR/.."
+OUT=$(mktemp -d)
+trap 'rm -rf "$OUT"' EXIT
+g++ -std=c++17 -I"$SRC" -I"$SRC/riscv" -I"$SRC/fesvr" -I"$SRC/softfloat" -I"$SRC/build" \
+    -o "$OUT/xlu-utst" "$SRC/riscv/cross_lane_unit.t.cc" "$SRC/riscv/cross_lane_unit.cc"
+"$OUT/xlu-utst"

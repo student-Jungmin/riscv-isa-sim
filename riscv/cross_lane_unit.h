@@ -14,11 +14,15 @@ class processor_t;
 
 // WHAT THE PENDING TILE IS FOR. The push names it, the pop runs it: no lane's answer
 // is known until every lane is in.
-// The numbering is the ISA's SIMM5 within each machine's funct7 family.
+// The numbering is the ISA's SIMM5. ONE FAMILY: transpose, broadcast and permute
+// are one machine -- this object, one queue pair, one `run()` -- and the encoding
+// says so. The transpose held a family of its own while the crossbar COMBINED and
+// it did not; with the reduce retired both only move, and SIMM5 0 is where the
+// reduce-add that split them used to sit.
 enum xlu_op_t {
-  XLU_TRANSPOSE  = 0,
-  XLU_BROADCAST  = 0x12,
-  XLU_PERMUTE    = 0x13,
+  XLU_TRANSPOSE  = 0,      // SIMM5 0
+  XLU_BROADCAST  = 0x12,   // SIMM5 2
+  XLU_PERMUTE    = 0x13,   // SIMM5 3
 };
 
 class crossLaneUnit_t
