@@ -2832,18 +2832,23 @@
 #define MATCH_TORCHSIM_VLANE_IDX 0x0000305B
 #define MASK_TORCHSIM_VLANE_IDX 0xFE00707F
 
-// The transpose unit. THE SF.VC FORM PICKS THE ENCODING, not a family: bit 29 says
+// The cross-lane unit. THE SF.VC FORM PICKS THE ENCODING, not a family: bit 29 says
 // the instruction takes a vector operand and bit 25 says it writes none, so a push
-// and a pop CANNOT share a VFUNCT6 -- the push must sit among the .iv forms
-// (funct7 0x15, beside i_vpush 0x11 and w_vpush 0x13) and the pop among the .v.i
-// forms (funct7 0x06, beside vpop 0x04). lower_to_vcix emits these through the
-// upstream sf.vc intrinsics, and an encoding off those forms is one it cannot ask for.
+// and a pop CANNOT share a VFUNCT6 -- the push sits among the .iv forms (funct7
+// 0x17, beside i_vpush 0x11 and w_vpush 0x13) and the pop among the .v.i forms
+// (funct7 0x02, beside vpop 0x04). lower_to_vcix emits these through the upstream
+// sf.vc intrinsics, and an encoding off those forms is one it cannot ask for.
+// ONE MACHINE HOLDS ONE FAMILY PAIR: the transpose and the crossbar were two and
+// are one, so 0x15 and 0x06 went back to the pool rather than staying reserved.
 // SIMM5 IS IN THE MASK, and that is the point of the rule: a family number is one
 // of only FOUR per form, so a different MACHINE gets a family and a different
 // OPERATION OF THE SAME MACHINE gets a SIMM5 (32 per family). Leaving SIMM5 out
-// would let this one instruction swallow all 32, and the second operation of the
-// transpose unit could then only be added by breaking this encoding.
+// would let this one instruction swallow all 32, and the unit's second operation
+// could then only be added by breaking this encoding.
 // `vlog`/`vsin`/`vcos`/`vatan` already share 0x14 this way.
+// AND THE FIVE BITS ARE THREE FIELDS: [4:3] pre-RPU, [2] XU, [1:0] post-RPU, so
+// the numbers below are a combination of answers and not positions in a list --
+// which is why gather (0x5 = cross, then replicate) is one instruction pair.
 #define MATCH_TORCHSIM_X_VPUSH_XPOSE 0x2E02305B
 #define MASK_TORCHSIM_X_VPUSH_XPOSE 0xFE0FF07F
 #define MATCH_TORCHSIM_X_VPOP_XPOSE 0x0402305B
