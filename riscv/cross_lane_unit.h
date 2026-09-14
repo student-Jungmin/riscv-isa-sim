@@ -21,11 +21,38 @@ class processor_t;
 // says so. The transpose held a family of its own while the crossbar COMBINED and
 // it did not; with the reduce retired both only move, and SIMM5 0 is where the
 // reduce-add that split them used to sit.
-enum xlu_op_t {
-  XLU_TRANSPOSE  = 0,      // SIMM5 0
-  XLU_BROADCAST  = 0x12,   // SIMM5 2
-  XLU_PERMUTE    = 0x13,   // SIMM5 3
+// THE FIVE BITS ARE THREE FIELDS, not a list of operations. What this unit can be
+// asked is exactly three questions -- shuffle the lanes BEFORE crossing, change the
+// depth WHILE crossing, shuffle them AFTER -- and an operation is a combination of
+// answers rather than a name in a table. That is why an all-gather is ONE pass here
+// and used to be two: a flat enumeration has no seat for "and then shuffle again",
+// so the compiler had to pop the transpose out to a vector register and push it back.
+//
+//   SIMM5[4:3]  pre  -- RPU    0 bypass · 1 replicate (canned) · 2 arbitrary (pattern)
+//   SIMM5[2]    XU             0 depth as it was · 1 depth <-> lane
+//   SIMM5[1:0]  post -- RPU    the same three
+//
+// RPU APPEARS TWICE AND XU ONCE BECAUSE THAT IS THE HARDWARE: the RPU sits on both
+// sides of the XU and the crossing always happens, which is why SIMM5 = 0 is a trap
+// rather than a no-op -- there is no reason to enter the unit without crossing.
+enum xlu_rpu_t {
+  XLU_RPU_BYPASS    = 0,
+  XLU_RPU_REPLICATE = 1,   // every lane reads lane 0
+  XLU_RPU_ARBITRARY = 2,   // every lane reads the lane row 0 names for it
 };
+
+// The combinations the compiler asks for today. A name here is a shorthand for a
+// field triple and never a fourth thing the unit knows how to do.
+enum xlu_op_t {
+  XLU_TRANSPOSE  = 4,      // pre bypass    · XU swap · post bypass
+  XLU_BROADCAST  = 8,      // pre replicate · XU keep · post bypass
+  XLU_PERMUTE    = 16,     // pre arbitrary · XU keep · post bypass
+  XLU_ALL_GATHER = 5,      // pre bypass    · XU swap · post replicate
+};
+
+static inline uint32_t xlu_pre(xlu_op_t o)  { return ((uint32_t)o >> 3) & 3u; }
+static inline uint32_t xlu_xu(xlu_op_t o)   { return ((uint32_t)o >> 2) & 1u; }
+static inline uint32_t xlu_post(xlu_op_t o) { return (uint32_t)o & 3u; }
 
 class crossLaneUnit_t
 {
@@ -47,9 +74,11 @@ public:
 public:
   void reset();
   void run();
-  void transpose(const std::vector<std::vector<uint32_t> > &tile);
-  void broadcast(const std::vector<std::vector<uint32_t> > &tile);
-  void permute(const std::vector<std::vector<uint32_t> > &tile);
+  typedef std::vector<std::vector<uint32_t> > tile_t;
+  tile_t crossing(const tile_t &tile);
+  tile_t rpu(uint32_t what, const tile_t &tile);
+  void emit(const tile_t &tile);
+
 
   crossLaneUnit_t(processor_t *p, reg_t n_vu) : p(p),
                                                 n_lane(n_vu),

@@ -141,8 +141,43 @@ static void test_bits_survive()
     check(u.pop(0) == bits[i], "transpose: the bits come back as themselves");
 }
 
+// ONE PASS, AND THAT IS THE WHOLE POINT OF THE FIELDS. An all-gather is the crossing
+// followed by a replicate: after the crossing lane 0 holds every lane's value, and the
+// post stage sends that row back to all of them. It used to be two instructions with a
+// vector register between them, because a flat operation code had no seat for "and
+// then shuffle again".
+static void test_all_gather()
+{
+  crossLaneUnit_t u(0, 4);
+  u.reset();
+  u.set_op(XLU_ALL_GATHER);
+  push_tile(u, {{10}, {20}, {30}, {40}});
+  u.run();
+  std::vector<std::vector<uint32_t> > got = drain(u, 4);
+  for (uint32_t lane = 0; lane < 4; lane++)
+    check(got[lane] == std::vector<uint32_t>({10, 20, 30, 40}),
+          "all-gather: every lane ends with every lane's value");
+}
+
+// THE FIELDS ARE WHAT THE NAMES MEAN, so the names must decompose the way the encoding
+// says. A name that drifted from its triple is an instruction spike and gem5 would
+// disagree about, and the disagreement is a wrong answer rather than a failure.
+static void test_the_names_are_their_fields()
+{
+  check(xlu_pre(XLU_TRANSPOSE) == XLU_RPU_BYPASS && xlu_xu(XLU_TRANSPOSE) == 1
+        && xlu_post(XLU_TRANSPOSE) == XLU_RPU_BYPASS, "transpose is 0/1/0");
+  check(xlu_pre(XLU_BROADCAST) == XLU_RPU_REPLICATE && xlu_xu(XLU_BROADCAST) == 0
+        && xlu_post(XLU_BROADCAST) == XLU_RPU_BYPASS, "broadcast is replicate/0/0");
+  check(xlu_pre(XLU_PERMUTE) == XLU_RPU_ARBITRARY && xlu_xu(XLU_PERMUTE) == 0
+        && xlu_post(XLU_PERMUTE) == XLU_RPU_BYPASS, "permute is arbitrary/0/0");
+  check(xlu_pre(XLU_ALL_GATHER) == XLU_RPU_BYPASS && xlu_xu(XLU_ALL_GATHER) == 1
+        && xlu_post(XLU_ALL_GATHER) == XLU_RPU_REPLICATE, "all-gather is 0/1/replicate");
+}
+
 int main()
 {
+  test_all_gather();
+  test_the_names_are_their_fields();
   test_transpose();
   test_broadcast();
   test_permute();

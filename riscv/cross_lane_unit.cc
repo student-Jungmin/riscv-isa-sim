@@ -57,18 +57,15 @@ void crossLaneUnit_t::run()
     while (!out[k]->empty())
       out[k]->pop();
 
-  switch (op) {
-    case XLU_BROADCAST:
-      broadcast(tile);
-      break;
-    case XLU_PERMUTE:
-      permute(tile);
-      break;
-    case XLU_TRANSPOSE:
-    default:
-      transpose(tile);
-      break;
-  }
+  // THE THREE STAGES, IN THE ORDER THE DATA MEETS THEM. Each hands a tile to the
+  // next, so a combination costs one pass where a flat enumeration cost two -- an
+  // all-gather used to leave the unit after the crossing and come back for the
+  // replicate, through a vector register both ways.
+  tile_t got = rpu(xlu_pre(op), tile);
+  if (xlu_xu(op))
+    got = crossing(got);
+  got = rpu(xlu_post(op), got);
+  emit(got);
 
   if (debug_flag) {
     printf("-------- Output --------\n");
@@ -88,39 +85,59 @@ void crossLaneUnit_t::run()
 }
 
 // Column k becomes lane k's row. ONLY `depth` LANES RECEIVE ANYTHING -- the tile was
-// `n_lane` wide and `depth` deep, so transposed it is `depth` wide, and the lanes
-// past that keep whatever they held.
-void crossLaneUnit_t::transpose(const std::vector<std::vector<uint32_t> > &tile)
+// `n_lane` wide and `depth` deep, so crossed it is `depth` wide, and the lanes past
+// that keep whatever they held.
+crossLaneUnit_t::tile_t crossLaneUnit_t::crossing(const tile_t &tile)
 {
+  tile_t got(n_lane);
   for (reg_t k = 0; k < depth && k < n_lane; k++)
     for (uint32_t lane = 0; lane < n_lane; lane++)
-      out[k]->push(k < tile[lane].size() ? tile[lane][k] : 0u);
+      got[k].push_back(k < tile[lane].size() ? tile[lane][k] : 0u);
+  return got;
 }
 
-// Lane 0's row to every lane. THE SOURCE IS LANE 0 BY CONVENTION and not by
-// election: a value with no lane axis is the one a single bank holds, and a DMA
-// that staged one element staged it there.
-// ROW 0 IS THE PATTERN AND NOT DATA: one lane number per lane, saying where that
-// lane READS FROM, AS A PLAIN INTEGER -- the queue carries raw bits, so the compiler
-// pushes the number and not a float spelling of it. The tile follows it through the
-// same queue, because an sf.vc form carries one vector operand and there is no second
-// one to describe a mapping with.
-void crossLaneUnit_t::permute(const std::vector<std::vector<uint32_t> > &tile)
+// The crossbar, which is the RPU's move: every lane reads SOME lane's row, and what
+// differs between its two settings is only where that lane number comes from.
+// REPLICATE IS LANE 0 BY CONVENTION and not by election: a value with no lane axis is
+// the one a single bank holds, and a DMA that staged one element staged it there.
+// ARBITRARY READS ROW 0 AS THE PATTERN AND NOT AS DATA -- one lane number per lane,
+// AS A PLAIN INTEGER, because the queue carries raw bits and an sf.vc form has one
+// vector operand with no second one to describe a mapping with.
+crossLaneUnit_t::tile_t crossLaneUnit_t::rpu(uint32_t what, const tile_t &tile)
 {
+  if (what == XLU_RPU_BYPASS)
+    return tile;
+  //: A ROW IS AS WIDE AS THE WIDEST, AND WHAT IS MISSING IS ZERO -- not absent.
+  //: A lane reading past the end of its source must still produce that column, or
+  //: the next pop takes the following tile's first value and the answer is wrong
+  //: rather than short. The width is the tile's own: `depth` on the way in, and the
+  //: lane count once the crossing has made rows out of columns.
+  size_t width = 0;
+  for (uint32_t lane = 0; lane < n_lane; lane++)
+    if (tile[lane].size() > width)
+      width = tile[lane].size();
+  tile_t got(n_lane);
   for (uint32_t lane = 0; lane < n_lane; lane++) {
-    uint32_t from = tile[lane].empty() ? lane : tile[lane][0];
-    for (reg_t k = 1; k < depth; k++) {
+    uint32_t from = 0;
+    size_t first = 0;
+    if (what == XLU_RPU_ARBITRARY) {
+      from = tile[lane].empty() ? lane : tile[lane][0];
+      first = 1;                      // row 0 was the pattern, not a value
+    }
+    for (size_t k = first; k < width; k++) {
       bool have = from < n_lane && k < tile[from].size();
-      out[lane]->push(have ? tile[from][k] : 0u);
+      got[lane].push_back(have ? tile[from][k] : 0u);
     }
   }
+  return got;
 }
 
-void crossLaneUnit_t::broadcast(const std::vector<std::vector<uint32_t> > &tile)
+// WHAT A POP DID NOT TAKE IS NOT THIS TILE'S, which `run` cleared before this; here
+// each lane's row simply becomes its output queue.
+void crossLaneUnit_t::emit(const tile_t &tile)
 {
-  for (reg_t k = 0; k < depth; k++) {
-    uint32_t v = k < tile[0].size() ? tile[0][k] : 0u;
-    for (uint32_t lane = 0; lane < n_lane; lane++)
-      out[lane]->push(v);
-  }
+  for (uint32_t lane = 0; lane < n_lane && lane < tile.size(); lane++)
+    for (size_t k = 0; k < tile[lane].size(); k++)
+      out[lane]->push(tile[lane][k]);
 }
+

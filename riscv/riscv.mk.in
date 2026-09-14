@@ -145,6 +145,8 @@ riscv_insn_ext_i = \
 	torchsim_x_vpop_permute \
 	torchsim_x_vpush_bcast \
 	torchsim_x_vpop_bcast \
+	torchsim_x_vpush_gather \
+	torchsim_x_vpop_gather \
 
 riscv_insn_ext_a = \
 	amoadd_d \
