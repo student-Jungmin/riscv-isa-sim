@@ -38,21 +38,22 @@ class processor_t;
 enum xlu_rpu_t {
   XLU_RPU_BYPASS    = 0,
   XLU_RPU_REPLICATE = 1,   // every lane reads lane 0
-  XLU_RPU_ARBITRARY = 2,   // every lane reads the lane row 0 names for it
+  XLU_RPU_ARBITRARY = 2,   // every lane reads the lane its pattern names
+  XLU_RPU_NONE      = 3,   // not a mode -- see `xlu_is_load`
 };
 
-// The combinations the compiler asks for today. A name here is a shorthand for a
-// field triple and never a fourth thing the unit knows how to do.
-enum xlu_op_t {
-  XLU_TRANSPOSE  = 4,      // pre bypass    · XU swap · post bypass
-  XLU_BROADCAST  = 8,      // pre replicate · XU keep · post bypass
-  XLU_PERMUTE    = 16,     // pre arbitrary · XU keep · post bypass
-  XLU_ALL_GATHER = 5,      // pre bypass    · XU swap · post replicate
-};
+// SIMM5 IS THE OPERATION AND THERE IS NO TABLE OF NAMES. Four names used to stand
+// for four triples and needed four instructions, because SIMM5 sat inside the mask;
+// it does not now, so one push and one pop carry every combination the fields spell.
+static inline uint32_t xlu_pre(uint32_t s)  { return (s >> 3) & 3u; }
+static inline uint32_t xlu_xu(uint32_t s)   { return (s >> 2) & 1u; }
+static inline uint32_t xlu_post(uint32_t s) { return s & 3u; }
 
-static inline uint32_t xlu_pre(xlu_op_t o)  { return ((uint32_t)o >> 3) & 3u; }
-static inline uint32_t xlu_xu(xlu_op_t o)   { return ((uint32_t)o >> 2) & 1u; }
-static inline uint32_t xlu_post(xlu_op_t o) { return (uint32_t)o & 3u; }
+// PRE = 3 IS NOT A PASS. The fourth pre value names no RPU mode, so the eight codes
+// it heads (24..31) are free to mean something other than "run the unit"; 24 is the
+// one that loads the post stage's pattern, which no pass can carry beside its data.
+static inline bool xlu_is_load(uint32_t s) { return xlu_pre(s) == XLU_RPU_NONE; }
+#define XLU_LOAD_POST_PATTERN 24u
 
 class crossLaneUnit_t
 {
@@ -63,24 +64,26 @@ public:
   // it was pushed; `out[L]` is lane L's column once `transpose` has run.
   std::queue<uint32_t> **in;
   std::queue<uint32_t> **out;
-  // THE PATTERN BESIDE THE DATA, one lane number per lane per row. An `sf.vc.ivv`
-  // push carries it in its second vector operand, so it costs no row of the tile
-  // and MAY DIFFER PER ROW -- which one read out of row 0 never could.
-  std::queue<uint32_t> **pat;
+  // ONE PATTERN QUEUE PER RPU STAGE, because the two stages walk different widths.
+  // `pre_pat` rides beside the data in an `sf.vc.ivv` push, so it is always exactly
+  // as long as `pre` is wide; `post_pat` is LOADED ON ITS OWN and can be any length.
+  std::queue<uint32_t> **pre_pat;
+  std::queue<uint32_t> **post_pat;
   // How deep each lane's row is -- the number of values pushed per lane since the
   // last transpose. IT IS THE TILE'S OTHER DIMENSION, so the transpose reads it
   // rather than assuming the tile is square.
   reg_t depth;
-  // The op the pending tile was pushed for. A push sets it; two pushes with
-  // different ops between one pop is the compiler's error, not a mode to model.
-  xlu_op_t op;
+  // The SIMM5 the pending tile was pushed for. A push sets it; two pushes with
+  // different ones between one pop is the compiler's error, not a mode to model.
+  uint32_t op;
 
 public:
   void reset();
   void run();
   typedef std::vector<std::vector<uint32_t> > tile_t;
   tile_t crossing(const tile_t &tile);
-  tile_t rpu(uint32_t what, const tile_t &tile, const tile_t &pattern);
+  tile_t rpu(uint32_t what, const tile_t &tile, const tile_t &pattern,
+             const char *stage);
   void emit(const tile_t &tile);
 
 
@@ -88,9 +91,10 @@ public:
                                                 n_lane(n_vu),
                                                 in(0),
                                                 out(0),
-                                                pat(0),
+                                                pre_pat(0),
+                                                post_pat(0),
                                                 depth(0),
-                                                op(XLU_TRANSPOSE)
+                                                op(0)
   {
   }
 
@@ -107,11 +111,17 @@ public:
       delete[] in;
       in = 0;
     }
-    if (pat) {
+    if (pre_pat) {
       for (uint32_t i = 0; i < n_lane; i++)
-        delete pat[i];
-      delete[] pat;
-      pat = 0;
+        delete pre_pat[i];
+      delete[] pre_pat;
+      pre_pat = 0;
+    }
+    if (post_pat) {
+      for (uint32_t i = 0; i < n_lane; i++)
+        delete post_pat[i];
+      delete[] post_pat;
+      post_pat = 0;
     }
     if (out) {
       for (uint32_t i = 0; i < n_lane; i++)
@@ -126,16 +136,24 @@ public:
     in[lane]->push(val);
   }
 
-  // THE SAME PUSH WITH ITS PATTERN, from the `.ivv` form's second vector. NO ROW
-  // OF THE TILE IS A PATTERN ANY MORE, which is why `rpu` has no row to skip --
-  // and the pattern MAY DIFFER PER ROW, which one read out of row 0 never could.
+  // THE SAME PUSH WITH THE PRE STAGE'S PATTERN, from the `.ivv` form's second
+  // vector. One entry per value, so this queue is always exactly as long as the
+  // pre stage is wide -- which is why only the post stage's can be mismatched.
   void push_p(uint32_t lane, uint32_t val, uint32_t p)
   {
     in[lane]->push(val);
-    pat[lane]->push(p);
+    pre_pat[lane]->push(p);
   }
 
-  void set_op(xlu_op_t o)
+  // THE POST STAGE'S PATTERN, ON ITS OWN. It cannot ride beside the data: after a
+  // crossing the post stage walks `n_lane` columns while the data is `depth` deep,
+  // so its length is the caller's to state and `rpu` holds it to the width.
+  void load_post(uint32_t lane, uint32_t p)
+  {
+    post_pat[lane]->push(p);
+  }
+
+  void set_op(uint32_t o)
   {
     op = o;
   }

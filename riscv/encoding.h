@@ -2849,27 +2849,18 @@
 // AND THE FIVE BITS ARE THREE FIELDS: [4:3] pre-RPU, [2] XU, [1:0] post-RPU, so
 // the numbers below are a combination of answers and not positions in a list --
 // which is why gather (0x5 = cross, then replicate) is one instruction pair.
-#define MATCH_TORCHSIM_X_VPUSH_XPOSE 0x2E02305B
-#define MASK_TORCHSIM_X_VPUSH_XPOSE 0xFE0FF07F
-#define MATCH_TORCHSIM_X_VPOP_XPOSE 0x0402305B
-#define MASK_TORCHSIM_X_VPOP_XPOSE 0xFE0FF07F
-// THE PERMUTE'S PUSH IS THE `.ivv` FORM AND NOT `.iv`: it takes a second vector
-// operand, which is where the pattern goes. funct6[5:2] is what the sf.vc forms
-// differ in -- 0010 is `.iv` and 1010 is `.ivv` -- so this is bit 31 above the
-// other pushes. `rs2` and `rd` are both outside the mask, which is what lets the
-// form carry two vector registers: `rs2` the data, `rd` the pattern.
-#define MATCH_TORCHSIM_X_VPUSH_PERMUTE 0xAE08305B
-#define MASK_TORCHSIM_X_VPUSH_PERMUTE 0xFE0FF07F
-#define MATCH_TORCHSIM_X_VPOP_PERMUTE 0x0408305B
-#define MASK_TORCHSIM_X_VPOP_PERMUTE 0xFE0FF07F
-#define MATCH_TORCHSIM_X_VPUSH_BCAST 0x2E04305B
-#define MASK_TORCHSIM_X_VPUSH_BCAST 0xFE0FF07F
-#define MATCH_TORCHSIM_X_VPOP_BCAST 0x0404305B
-#define MASK_TORCHSIM_X_VPOP_BCAST 0xFE0FF07F
-#define MATCH_TORCHSIM_X_VPUSH_GATHER 0x2E02B05B
-#define MASK_TORCHSIM_X_VPUSH_GATHER 0xFE0FF07F
-#define MATCH_TORCHSIM_X_VPOP_GATHER 0x0402B05B
-#define MASK_TORCHSIM_X_VPOP_GATHER 0xFE0FF07F
+// THE CROSS-LANE UNIT IS THREE INSTRUCTIONS, not two per combination. SIMM5 named
+// the operation and sat INSIDE the mask, so every pass needed its own encoding; it
+// is outside now, so one push, one two-vector push and one pop carry all of them.
+// `.ivv` is `.iv` with funct6 bit 5 set -- 001011 -> 101011 -- and its second vector
+// is the pre stage's pattern. The post stage's arrives by a push whose SIMM5 has
+// pre = 3, which names no RPU mode and so cannot be a pass.
+#define MATCH_TORCHSIM_X_VPUSH 0x2E00305B
+#define MASK_TORCHSIM_X_VPUSH 0xFE00707F
+#define MATCH_TORCHSIM_X_VPUSH_P 0xAE00305B
+#define MASK_TORCHSIM_X_VPUSH_P 0xFE00707F
+#define MATCH_TORCHSIM_X_VPOP 0x0400305B
+#define MASK_TORCHSIM_X_VPOP 0xFE00707F
 
 #define CSR_FFLAGS 0x1
 #define CSR_FRM 0x2
@@ -3634,15 +3625,10 @@ DECLARE_INSN(torchsim_vlog, MATCH_TORCHSIM_VLOG, MASK_TORCHSIM_VLOG)
 DECLARE_INSN(torchsim_vatan, MATCH_TORCHSIM_VATAN, MASK_TORCHSIM_VATAN)
 DECLARE_INSN(torchsim_vsin, MATCH_TORCHSIM_VSIN, MASK_TORCHSIM_VSIN)
 DECLARE_INSN(torchsim_vcos, MATCH_TORCHSIM_VCOS, MASK_TORCHSIM_VCOS)
+DECLARE_INSN(torchsim_x_vpush, MATCH_TORCHSIM_X_VPUSH, MASK_TORCHSIM_X_VPUSH)
+DECLARE_INSN(torchsim_x_vpush_p, MATCH_TORCHSIM_X_VPUSH_P, MASK_TORCHSIM_X_VPUSH_P)
+DECLARE_INSN(torchsim_x_vpop, MATCH_TORCHSIM_X_VPOP, MASK_TORCHSIM_X_VPOP)
 DECLARE_INSN(torchsim_vlane_idx, MATCH_TORCHSIM_VLANE_IDX, MASK_TORCHSIM_VLANE_IDX)
-DECLARE_INSN(torchsim_x_vpush_xpose, MATCH_TORCHSIM_X_VPUSH_XPOSE, MASK_TORCHSIM_X_VPUSH_XPOSE)
-DECLARE_INSN(torchsim_x_vpop_xpose, MATCH_TORCHSIM_X_VPOP_XPOSE, MASK_TORCHSIM_X_VPOP_XPOSE)
-DECLARE_INSN(torchsim_x_vpush_permute, MATCH_TORCHSIM_X_VPUSH_PERMUTE, MASK_TORCHSIM_X_VPUSH_PERMUTE)
-DECLARE_INSN(torchsim_x_vpop_permute, MATCH_TORCHSIM_X_VPOP_PERMUTE, MASK_TORCHSIM_X_VPOP_PERMUTE)
-DECLARE_INSN(torchsim_x_vpush_bcast, MATCH_TORCHSIM_X_VPUSH_BCAST, MASK_TORCHSIM_X_VPUSH_BCAST)
-DECLARE_INSN(torchsim_x_vpop_bcast, MATCH_TORCHSIM_X_VPOP_BCAST, MASK_TORCHSIM_X_VPOP_BCAST)
-DECLARE_INSN(torchsim_x_vpush_gather, MATCH_TORCHSIM_X_VPUSH_GATHER, MASK_TORCHSIM_X_VPUSH_GATHER)
-DECLARE_INSN(torchsim_x_vpop_gather, MATCH_TORCHSIM_X_VPOP_GATHER, MASK_TORCHSIM_X_VPOP_GATHER)
 DECLARE_INSN(custom1_rd, MATCH_CUSTOM1_RD, MASK_CUSTOM1_RD)
 DECLARE_INSN(custom1_rd_rs1, MATCH_CUSTOM1_RD_RS1, MASK_CUSTOM1_RD_RS1)
 DECLARE_INSN(custom1_rd_rs1_rs2, MATCH_CUSTOM1_RD_RS1_RS2, MASK_CUSTOM1_RD_RS1_RS2)

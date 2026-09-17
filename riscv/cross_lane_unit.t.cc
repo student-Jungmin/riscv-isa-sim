@@ -4,6 +4,8 @@
 #include "cross_lane_unit.h"
 
 #include <cstdio>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <vector>
 
 static int failures = 0;
@@ -14,6 +16,13 @@ static void check(bool ok, const char *what)
     printf("FAILED: %s\n", what);
     failures++;
   }
+}
+
+// THE OPERATION IS ITS THREE FIELDS AND NOTHING ELSE. These are spelled out of the
+// fields rather than named, because a name is a second place for a triple to live.
+static uint32_t op(uint32_t pre, uint32_t xu, uint32_t post)
+{
+  return (pre << 3) | (xu << 2) | post;
 }
 
 // Push `tile[lane][k]` a column at a time, the way an instruction stream does: one
@@ -28,6 +37,32 @@ static void push_tile(crossLaneUnit_t &u, const std::vector<std::vector<uint32_t
   }
 }
 
+// The same, with the PRE stage's pattern beside each value -- the `.ivv` push. One
+// entry per value, so this queue is always exactly as long as `pre` is wide.
+static void push_tile_p(crossLaneUnit_t &u,
+                        const std::vector<std::vector<uint32_t> > &tile,
+                        const std::vector<std::vector<uint32_t> > &pat)
+{
+  size_t depth = tile[0].size();
+  for (size_t k = 0; k < depth; k++) {
+    for (uint32_t lane = 0; lane < u.get_n_lane(); lane++)
+      u.push_p(lane, lane < tile.size() ? tile[lane][k] : 0u,
+               lane < pat.size() ? pat[lane][k] : lane);
+    u.depth += 1;
+  }
+}
+
+// The POST stage's pattern, loaded on its own: `want[lane]` repeated for as many
+// columns as that stage will walk. It cannot ride with the data -- after a crossing
+// the post stage walks `n_lane` columns while the tile is only `depth` deep.
+static void load_post(crossLaneUnit_t &u, const std::vector<uint32_t> &want,
+                      size_t width)
+{
+  for (size_t k = 0; k < width; k++)
+    for (uint32_t lane = 0; lane < u.get_n_lane(); lane++)
+      u.load_post(lane, lane < want.size() ? want[lane] : lane);
+}
+
 static std::vector<std::vector<uint32_t> > drain(crossLaneUnit_t &u, size_t per_lane)
 {
   std::vector<std::vector<uint32_t> > out(u.get_n_lane());
@@ -38,13 +73,12 @@ static std::vector<std::vector<uint32_t> > drain(crossLaneUnit_t &u, size_t per_
 }
 
 // A TRANSPOSE MAKES THE DEPTH INDEX THE LANE INDEX. Column k becomes lane k's row,
-// and only `depth` lanes receive anything -- the tile was n_lane wide and depth deep,
-// so transposed it is depth wide.
+// and only `depth` lanes receive anything.
 static void test_transpose()
 {
   crossLaneUnit_t u(0, 4);
   u.reset();
-  u.set_op(XLU_TRANSPOSE);
+  u.set_op(op(XLU_RPU_BYPASS, 1, XLU_RPU_BYPASS));
   push_tile(u, {{1, 2}, {3, 4}, {5, 6}, {7, 8}});
   u.run();
   std::vector<std::vector<uint32_t> > got = drain(u, 4);
@@ -53,14 +87,11 @@ static void test_transpose()
   check(got[2].empty(), "transpose: a lane past the depth is given nothing");
 }
 
-// ONE BANK'S ROW TO EVERY LANE, and lane 0 is the bank by convention: a value with no
-// lane axis is the one a single bank holds, and a DMA that staged one element staged
-// it there.
 static void test_broadcast()
 {
   crossLaneUnit_t u(0, 4);
   u.reset();
-  u.set_op(XLU_BROADCAST);
+  u.set_op(op(XLU_RPU_REPLICATE, 0, XLU_RPU_BYPASS));
   push_tile(u, {{9, 8}, {0, 0}, {0, 0}, {0, 0}});
   u.run();
   std::vector<std::vector<uint32_t> > got = drain(u, 2);
@@ -68,25 +99,74 @@ static void test_broadcast()
     check(got[lane] == std::vector<uint32_t>({9, 8}), "broadcast: every lane gets lane 0's row");
 }
 
-// ROW 0 IS THE PATTERN AND NOT DATA -- one lane number per lane, saying where that lane
-// READS FROM. It arrives down the same queue because an sf.vc form carries one vector
-// operand and there is no second one to describe a mapping with.
+// THE PRE PATTERN RIDES BESIDE THE DATA and costs the tile no row. It used to be row
+// 0 of the tile, which cost a row and bound every row of the tile to one mapping.
 static void test_permute()
 {
   crossLaneUnit_t u(0, 4);
   u.reset();
-  u.set_op(XLU_PERMUTE);
-  //            pattern  row
-  push_tile(u, {{2,      10},
-                {3,      20},
-                {0,      30},
-                {9,      40}});      // 9 is past the end: that lane reads nothing
+  u.set_op(op(XLU_RPU_ARBITRARY, 0, XLU_RPU_BYPASS));
+  push_tile_p(u, {{10}, {20}, {30}, {40}},
+                 {{2},  {3},  {0},  {9}});   // 9 is past the end: that lane reads nothing
   u.run();
   std::vector<std::vector<uint32_t> > got = drain(u, 1);
   check(got[0] == std::vector<uint32_t>({30}), "permute: lane 0 reads lane 2");
   check(got[1] == std::vector<uint32_t>({40}), "permute: lane 1 reads lane 3");
   check(got[2] == std::vector<uint32_t>({10}), "permute: lane 2 reads lane 0");
   check(got[3] == std::vector<uint32_t>({0}),  "permute: a source past the end gives zero");
+}
+
+// A ROW MAY NAME ITS OWN SOURCE, which a pattern read out of row 0 never could: one
+// row per column of the pre stage, so the two rows below take different mappings.
+static void test_the_pre_pattern_may_differ_per_row()
+{
+  crossLaneUnit_t u(0, 4);
+  u.reset();
+  u.set_op(op(XLU_RPU_ARBITRARY, 0, XLU_RPU_BYPASS));
+  push_tile_p(u, {{10, 11}, {20, 21}, {30, 31}, {40, 41}},
+                 {{1,   2}, {1,   2}, {1,   2}, {1,   2}});
+  u.run();
+  std::vector<std::vector<uint32_t> > got = drain(u, 2);
+  check(got[0] == std::vector<uint32_t>({20, 31}),
+        "permute: column 0 reads lane 1 and column 1 reads lane 2");
+}
+
+// THE POST PATTERN IS LOADED, NOT PAIRED. After the crossing the stage walks
+// `n_lane` columns while the tile is `depth` deep, so no push beside the data could
+// be long enough -- which is why the load exists and why `.vvv` would not have helped.
+static void test_post_pattern_after_a_crossing()
+{
+  crossLaneUnit_t u(0, 4);
+  u.reset();
+  load_post(u, {1, 0, 3, 2}, 4);        // the crossed tile is 4 columns wide
+  u.set_op(op(XLU_RPU_BYPASS, 1, XLU_RPU_ARBITRARY));
+  push_tile(u, {{1, 2}, {3, 4}, {5, 6}, {7, 8}});
+  u.run();
+  std::vector<std::vector<uint32_t> > got = drain(u, 4);
+  // the crossing puts column 0 in lane 0 and column 1 in lane 1; post swaps them
+  check(got[0] == std::vector<uint32_t>({2, 4, 6, 8}), "post: lane 0 reads lane 1's row");
+  check(got[1] == std::vector<uint32_t>({1, 3, 5, 7}), "post: lane 1 reads lane 0's row");
+}
+
+// AS MANY LANE NUMBERS AS THERE ARE COLUMNS, and the caller states them. A short
+// queue used to be padded with the identity, which permuted the leading columns and
+// left the rest in place without saying so -- a wrong answer, not a trap.
+static void test_a_short_pattern_traps()
+{
+  pid_t kid = fork();
+  if (kid == 0) {
+    crossLaneUnit_t u(0, 4);
+    u.reset();
+    load_post(u, {1, 0, 3, 2}, 2);      // two, where the stage walks four
+    u.set_op(op(XLU_RPU_BYPASS, 1, XLU_RPU_ARBITRARY));
+    push_tile(u, {{1, 2}, {3, 4}, {5, 6}, {7, 8}});
+    u.run();
+    _exit(0);                           // reached only if nothing refused
+  }
+  int status = 0;
+  waitpid(kid, &status, 0);
+  check(WIFEXITED(status) && WEXITSTATUS(status) == INVALID_XLU_PATTERN,
+        "rpu: a pattern shorter than the stage is wide is refused");
 }
 
 // WHAT A POP DID NOT TAKE IS NOT THE NEXT TILE'S. A push covers every lane but only the
@@ -97,11 +177,11 @@ static void test_no_residue_between_tiles()
 {
   crossLaneUnit_t u(0, 4);
   u.reset();
-  u.set_op(XLU_TRANSPOSE);
+  u.set_op(op(XLU_RPU_BYPASS, 1, XLU_RPU_BYPASS));
   push_tile(u, {{1, 2}, {3, 4}, {5, 6}, {7, 8}});
   u.run();
   (void)u.pop(0);                       // take ONE value and leave the rest standing
-  u.set_op(XLU_TRANSPOSE);
+  u.set_op(op(XLU_RPU_BYPASS, 1, XLU_RPU_BYPASS));
   push_tile(u, {{100, 0}, {200, 0}, {300, 0}, {400, 0}});
   u.run();
   std::vector<std::vector<uint32_t> > got = drain(u, 4);
@@ -115,7 +195,7 @@ static void test_depth_is_counted_not_assumed()
 {
   crossLaneUnit_t u(0, 4);
   u.reset();
-  u.set_op(XLU_TRANSPOSE);
+  u.set_op(op(XLU_RPU_BYPASS, 1, XLU_RPU_BYPASS));
   push_tile(u, {{1}, {2}, {3}, {4}});
   u.run();
   std::vector<std::vector<uint32_t> > got = drain(u, 4);
@@ -123,34 +203,27 @@ static void test_depth_is_counted_not_assumed()
   check(got[1].empty(), "transpose: and nowhere else");
 }
 
-// EVERY BIT PATTERN CROSSES UNCHANGED. The queues carry 32 RAW BITS and nothing in
-// the unit reads what they mean, so a signalling NaN, a denormal and a set sign bit
-// are all just words -- which is the property that lets an integer tile cross at all.
+// THE QUEUES CARRY 32 RAW BITS. Nothing here reads what they mean, so a float, a NaN
+// and a lane number all cross as themselves.
 static void test_bits_survive()
 {
   crossLaneUnit_t u(0, 4);
   u.reset();
-  u.set_op(XLU_TRANSPOSE);
-  const uint32_t bits[4] = {0xFFFFFFFFu, 0x7F800001u, 0x00000001u, 0x80000000u};
-  std::vector<std::vector<uint32_t> > tile(4);
-  for (int i = 0; i < 4; i++)
-    tile[i].push_back(bits[i]);
-  push_tile(u, tile);
+  u.set_op(op(XLU_RPU_BYPASS, 1, XLU_RPU_BYPASS));
+  uint32_t bits[4] = {0x7fc00000u, 0xffffffffu, 0x80000000u, 0x00000001u};
+  push_tile(u, {{bits[0]}, {bits[1]}, {bits[2]}, {bits[3]}});
   u.run();
   for (int i = 0; i < 4; i++)
     check(u.pop(0) == bits[i], "transpose: the bits come back as themselves");
 }
 
-// ONE PASS, AND THAT IS THE WHOLE POINT OF THE FIELDS. An all-gather is the crossing
-// followed by a replicate: after the crossing lane 0 holds every lane's value, and the
-// post stage sends that row back to all of them. It used to be two instructions with a
-// vector register between them, because a flat operation code had no seat for "and
-// then shuffle again".
+// AN ALL-GATHER IS ONE PASS, and it is one because the post stage exists: cross, then
+// hand lane 0's row -- which is now a depth slice -- back to every lane.
 static void test_all_gather()
 {
   crossLaneUnit_t u(0, 4);
   u.reset();
-  u.set_op(XLU_ALL_GATHER);
+  u.set_op(op(XLU_RPU_BYPASS, 1, XLU_RPU_REPLICATE));
   push_tile(u, {{10}, {20}, {30}, {40}});
   u.run();
   std::vector<std::vector<uint32_t> > got = drain(u, 4);
@@ -159,28 +232,27 @@ static void test_all_gather()
           "all-gather: every lane ends with every lane's value");
 }
 
-// THE FIELDS ARE WHAT THE NAMES MEAN, so the names must decompose the way the encoding
-// says. A name that drifted from its triple is an instruction spike and gem5 would
-// disagree about, and the disagreement is a wrong answer rather than a failure.
-static void test_the_names_are_their_fields()
+// PRE = 3 IS NOT A PASS. The fourth pre value names no RPU mode, which is what makes
+// the eight codes it heads free to mean "load" instead of "run".
+static void test_the_fields_decompose()
 {
-  check(xlu_pre(XLU_TRANSPOSE) == XLU_RPU_BYPASS && xlu_xu(XLU_TRANSPOSE) == 1
-        && xlu_post(XLU_TRANSPOSE) == XLU_RPU_BYPASS, "transpose is 0/1/0");
-  check(xlu_pre(XLU_BROADCAST) == XLU_RPU_REPLICATE && xlu_xu(XLU_BROADCAST) == 0
-        && xlu_post(XLU_BROADCAST) == XLU_RPU_BYPASS, "broadcast is replicate/0/0");
-  check(xlu_pre(XLU_PERMUTE) == XLU_RPU_ARBITRARY && xlu_xu(XLU_PERMUTE) == 0
-        && xlu_post(XLU_PERMUTE) == XLU_RPU_BYPASS, "permute is arbitrary/0/0");
-  check(xlu_pre(XLU_ALL_GATHER) == XLU_RPU_BYPASS && xlu_xu(XLU_ALL_GATHER) == 1
-        && xlu_post(XLU_ALL_GATHER) == XLU_RPU_REPLICATE, "all-gather is 0/1/replicate");
+  check(xlu_pre(op(2, 1, 1)) == XLU_RPU_ARBITRARY && xlu_xu(op(2, 1, 1)) == 1
+        && xlu_post(op(2, 1, 1)) == XLU_RPU_REPLICATE, "SIMM5 21 is arbitrary/swap/replicate");
+  check(!xlu_is_load(op(2, 1, 1)), "a pass is not a load");
+  check(xlu_is_load(XLU_LOAD_POST_PATTERN), "the post-pattern load is not a pass");
+  check(xlu_pre(XLU_LOAD_POST_PATTERN) == XLU_RPU_NONE, "and it is pre = 3 that says so");
 }
 
 int main()
 {
   test_all_gather();
-  test_the_names_are_their_fields();
+  test_the_fields_decompose();
   test_transpose();
   test_broadcast();
   test_permute();
+  test_the_pre_pattern_may_differ_per_row();
+  test_post_pattern_after_a_crossing();
+  test_a_short_pattern_traps();
   test_no_residue_between_tiles();
   test_depth_is_counted_not_assumed();
   test_bits_survive();

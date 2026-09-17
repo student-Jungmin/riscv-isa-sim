@@ -17,6 +17,8 @@
 
 // ERROR CODES
 #define INVALID_SPAD_ACCESS 200
+// A cross-lane pass whose pattern queue is not as long as the stage is wide.
+#define INVALID_XLU_PATTERN 201
 #define STACK_OVERFLOW 201
 
 #endif

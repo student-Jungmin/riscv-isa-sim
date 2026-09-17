@@ -1,21 +1,22 @@
-// The push that carries its PATTERN beside the data, from the `.ivv` form's second
-// vector operand. NO ROW OF THE TILE IS A PATTERN: `rpu` has none to skip, and the
-// pattern may differ per row, which one read out of row 0 never could.
+// The push that carries the PRE stage's pattern beside the data, in the `.ivv`
+// form's second vector. One entry per value, so this queue is always exactly as
+// long as the pre stage is wide -- only the post stage's can ever be mismatched.
 
 const reg_t vs = insn.rs2();          // the data
 const reg_t vp = insn.rd();           // the pattern -- a lane number per lane
+const uint32_t simm5 = (uint32_t)(insn.v_simm5() & 0x1f);
 const reg_t vl = P.VU.vl->read();
 const reg_t n_vu = P.VU.get_vu_num();
 const reg_t vstart = P.VU.vstart->read();
 const char* debug_env = std::getenv("SPIKE_XLU_DEBUG");
 const int debug_flag = debug_env ? std::stoi(debug_env) : 0;
 
-P.XLU->set_op(XLU_PUSH_OP);
+P.XLU->set_op(simm5);
 
 for (reg_t vu_idx = 0; vu_idx < n_vu; vu_idx++) {
     P.VU.vstart->write(vstart);
     if (debug_flag && vu_idx < 8) {
-        printf("[%s] lane[%ld] ", XLU_PUSH_TAG, vu_idx);
+        printf("[X_VPUSH_P simm5=%u] lane[%ld] ", simm5, vu_idx);
     }
     for (reg_t i = 0; i < vl; ++i) {
         VI_STRIP(i);
