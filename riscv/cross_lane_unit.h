@@ -63,6 +63,10 @@ public:
   // it was pushed; `out[L]` is lane L's column once `transpose` has run.
   std::queue<uint32_t> **in;
   std::queue<uint32_t> **out;
+  // THE PATTERN BESIDE THE DATA, one lane number per lane per row. An `sf.vc.ivv`
+  // push carries it in its second vector operand, so it costs no row of the tile
+  // and MAY DIFFER PER ROW -- which one read out of row 0 never could.
+  std::queue<uint32_t> **pat;
   // How deep each lane's row is -- the number of values pushed per lane since the
   // last transpose. IT IS THE TILE'S OTHER DIMENSION, so the transpose reads it
   // rather than assuming the tile is square.
@@ -76,7 +80,7 @@ public:
   void run();
   typedef std::vector<std::vector<uint32_t> > tile_t;
   tile_t crossing(const tile_t &tile);
-  tile_t rpu(uint32_t what, const tile_t &tile);
+  tile_t rpu(uint32_t what, const tile_t &tile, const tile_t &pattern);
   void emit(const tile_t &tile);
 
 
@@ -84,6 +88,7 @@ public:
                                                 n_lane(n_vu),
                                                 in(0),
                                                 out(0),
+                                                pat(0),
                                                 depth(0),
                                                 op(XLU_TRANSPOSE)
   {
@@ -102,6 +107,12 @@ public:
       delete[] in;
       in = 0;
     }
+    if (pat) {
+      for (uint32_t i = 0; i < n_lane; i++)
+        delete pat[i];
+      delete[] pat;
+      pat = 0;
+    }
     if (out) {
       for (uint32_t i = 0; i < n_lane; i++)
         delete out[i];
@@ -113,6 +124,15 @@ public:
   void push(uint32_t lane, uint32_t val)
   {
     in[lane]->push(val);
+  }
+
+  // THE SAME PUSH WITH ITS PATTERN, from the `.ivv` form's second vector. NO ROW
+  // OF THE TILE IS A PATTERN ANY MORE, which is why `rpu` has no row to skip --
+  // and the pattern MAY DIFFER PER ROW, which one read out of row 0 never could.
+  void push_p(uint32_t lane, uint32_t val, uint32_t p)
+  {
+    in[lane]->push(val);
+    pat[lane]->push(p);
   }
 
   void set_op(xlu_op_t o)

@@ -2853,7 +2853,12 @@
 #define MASK_TORCHSIM_X_VPUSH_XPOSE 0xFE0FF07F
 #define MATCH_TORCHSIM_X_VPOP_XPOSE 0x0402305B
 #define MASK_TORCHSIM_X_VPOP_XPOSE 0xFE0FF07F
-#define MATCH_TORCHSIM_X_VPUSH_PERMUTE 0x2E08305B
+// THE PERMUTE'S PUSH IS THE `.ivv` FORM AND NOT `.iv`: it takes a second vector
+// operand, which is where the pattern goes. funct6[5:2] is what the sf.vc forms
+// differ in -- 0010 is `.iv` and 1010 is `.ivv` -- so this is bit 31 above the
+// other pushes. `rs2` and `rd` are both outside the mask, which is what lets the
+// form carry two vector registers: `rs2` the data, `rd` the pattern.
+#define MATCH_TORCHSIM_X_VPUSH_PERMUTE 0xAE08305B
 #define MASK_TORCHSIM_X_VPUSH_PERMUTE 0xFE0FF07F
 #define MATCH_TORCHSIM_X_VPOP_PERMUTE 0x0408305B
 #define MASK_TORCHSIM_X_VPOP_PERMUTE 0xFE0FF07F

@@ -9,10 +9,13 @@ void crossLaneUnit_t::reset()
 
   in = new std::queue<uint32_t>*[n_lane];
   out = new std::queue<uint32_t>*[n_lane];
+  pat = new std::queue<uint32_t>*[n_lane];
   for (uint32_t i = 0; i < n_lane; i++)
     in[i] = new std::queue<uint32_t>();
   for (uint32_t i = 0; i < n_lane; i++)
     out[i] = new std::queue<uint32_t>();
+  for (uint32_t i = 0; i < n_lane; i++)
+    pat[i] = new std::queue<uint32_t>();
 
   depth = 0;
   op = XLU_TRANSPOSE;
@@ -29,11 +32,18 @@ void crossLaneUnit_t::run()
   // column or any reduction is, which is why this cannot happen a push at a time the
   // the systolic array's compute does.
   std::vector<std::vector<uint32_t> > tile(n_lane);
+  std::vector<std::vector<uint32_t> > pattern(n_lane);
   for (uint32_t lane = 0; lane < n_lane; lane++) {
     tile[lane].reserve(depth);
     for (reg_t k = 0; k < depth && !in[lane]->empty(); k++) {
       tile[lane].push_back(in[lane]->front());
       in[lane]->pop();
+    }
+    //: THE PATTERN COMES OFF ITS OWN QUEUE, one entry per row this lane pushed.
+    //: A tile pushed without one leaves this empty and `rpu` reads the identity.
+    while (!pat[lane]->empty()) {
+      pattern[lane].push_back(pat[lane]->front());
+      pat[lane]->pop();
     }
   }
 
@@ -61,10 +71,10 @@ void crossLaneUnit_t::run()
   // next, so a combination costs one pass where a flat enumeration cost two -- an
   // all-gather used to leave the unit after the crossing and come back for the
   // replicate, through a vector register both ways.
-  tile_t got = rpu(xlu_pre(op), tile);
+  tile_t got = rpu(xlu_pre(op), tile, pattern);
   if (xlu_xu(op))
     got = crossing(got);
-  got = rpu(xlu_post(op), got);
+  got = rpu(xlu_post(op), got, pattern);
   emit(got);
 
   if (debug_flag) {
@@ -100,10 +110,11 @@ crossLaneUnit_t::tile_t crossLaneUnit_t::crossing(const tile_t &tile)
 // differs between its two settings is only where that lane number comes from.
 // REPLICATE IS LANE 0 BY CONVENTION and not by election: a value with no lane axis is
 // the one a single bank holds, and a DMA that staged one element staged it there.
-// ARBITRARY READS ROW 0 AS THE PATTERN AND NOT AS DATA -- one lane number per lane,
-// AS A PLAIN INTEGER, because the queue carries raw bits and an sf.vc form has one
-// vector operand with no second one to describe a mapping with.
-crossLaneUnit_t::tile_t crossLaneUnit_t::rpu(uint32_t what, const tile_t &tile)
+// ARBITRARY READS THE PATTERN THE PUSH CARRIED BESIDE THE DATA -- one lane number per
+// lane PER ROW, from the `.ivv` form's second vector. It used to be row 0 of the tile,
+// which cost a row and bound the whole tile to one mapping; neither is true now.
+crossLaneUnit_t::tile_t crossLaneUnit_t::rpu(uint32_t what, const tile_t &tile,
+                                             const tile_t &pattern)
 {
   if (what == XLU_RPU_BYPASS)
     return tile;
@@ -118,13 +129,13 @@ crossLaneUnit_t::tile_t crossLaneUnit_t::rpu(uint32_t what, const tile_t &tile)
       width = tile[lane].size();
   tile_t got(n_lane);
   for (uint32_t lane = 0; lane < n_lane; lane++) {
-    uint32_t from = 0;
-    size_t first = 0;
-    if (what == XLU_RPU_ARBITRARY) {
-      from = tile[lane].empty() ? lane : tile[lane][0];
-      first = 1;                      // row 0 was the pattern, not a value
-    }
-    for (size_t k = first; k < width; k++) {
+    for (size_t k = 0; k < width; k++) {
+      //: A ROW'S OWN LANE NUMBER, and lane 0 for a replicate. A tile pushed
+      //: without a pattern where one is asked for reads itself, which is the
+      //: identity -- a missing pattern is never another lane's row.
+      uint32_t from = 0;
+      if (what == XLU_RPU_ARBITRARY)
+        from = k < pattern[lane].size() ? pattern[lane][k] : lane;
       bool have = from < n_lane && k < tile[from].size();
       got[lane].push_back(have ? tile[from][k] : 0u);
     }
