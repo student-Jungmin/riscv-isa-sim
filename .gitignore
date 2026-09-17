@@ -5,3 +5,9 @@ autom4te.cache/
 *.o
 *.d
 .gdb_history
+
+# The local build, and NOT a thing to ship: 353 MB, three files over
+# GitHub's 100 MB limit. It was tracked once by accident and that made the
+# commit which did it unpushable. The pair rule says this install must be built
+# here anyway -- see psto-env.sh.
+/install/
